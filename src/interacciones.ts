@@ -78,7 +78,7 @@ export function crearRutasDeInteraccion(proveedor: Provider, configuracion: Conf
             responderHtml(respuesta, 400, paginaDeLogin(interaccion.uid, '', 'Faltan datos.'));
             return;
         }
-        var valido: boolean = await verificarCredenciales(configuracion.archivoDeUsuarios, usuario, contrasena);
+        var valido: boolean = await verificarCredenciales(configuracion.archivoDeUsuarios, usuario, contrasena, configuracion.parametrosScram);
         if (!valido) {
             responderHtml(respuesta, 401, paginaDeLogin(interaccion.uid, usuario, 'Usuario o contraseña incorrectos.'));
             return;

@@ -28,7 +28,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node --env-file=.env dist/servidor.js",
-    "crear-usuario": "node dist/crear-usuario.js",
+    "crear-usuario": "node --env-file=.env dist/crear-usuario.js",
     "test": "echo faltan los tests",
     "test-ci": "echo faltan los tests que producen coverage/.lcov"
   },

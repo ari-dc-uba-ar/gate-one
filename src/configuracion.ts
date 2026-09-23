@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { PARAMETROS_SCRAM_DE_POSTGRES, type ParametrosScram } from './scram.ts';
 
 export interface Configuracion {
     readonly emisor: string;
@@ -14,6 +15,7 @@ export interface Configuracion {
     readonly duracionDelAccessTokenEnSegundos: number;
     readonly archivoDeUsuarios: string;
     readonly archivoDeClaves: string;
+    readonly parametrosScram: ParametrosScram;
 }
 
 function variableObligatoria(nombre: string): string {
@@ -52,6 +54,14 @@ export function rutaDelArchivoDeClaves(): string {
     return resolve(process.cwd(), 'datos', 'jwks.json');
 }
 
+/** Parámetros de los verificadores nuevos. Por omisión, los de PostgreSQL. */
+export function leerParametrosScram(): ParametrosScram {
+    return {
+        iteraciones: numeroDeVariable('AUTH_SCRAM_ITERACIONES', PARAMETROS_SCRAM_DE_POSTGRES.iteraciones),
+        longitudDeLaSal: numeroDeVariable('AUTH_SCRAM_LONGITUD_DE_LA_SAL', PARAMETROS_SCRAM_DE_POSTGRES.longitudDeLaSal),
+    };
+}
+
 export function leerConfiguracion(): Configuracion {
     var clavesDeCookies: string[] = variableObligatoria('AUTH_CLAVES_DE_COOKIES')
         .split(',')
@@ -74,5 +84,6 @@ export function leerConfiguracion(): Configuracion {
         duracionDelAccessTokenEnSegundos: numeroDeVariable('AUTH_DURACION_ACCESS_TOKEN', 600),
         archivoDeUsuarios: rutaDelArchivoDeUsuarios(),
         archivoDeClaves: rutaDelArchivoDeClaves(),
+        parametrosScram: leerParametrosScram(),
     };
 }

@@ -1,5 +1,5 @@
 import { createInterface, type Interface } from 'node:readline/promises';
-import { rutaDelArchivoDeUsuarios } from './configuracion.ts';
+import { leerParametrosScram, rutaDelArchivoDeUsuarios } from './configuracion.ts';
 import { agregarUsuario } from './usuarios.ts';
 
 /**
@@ -18,7 +18,7 @@ async function principal(): Promise<void> {
             throw new Error('la contraseña no puede estar vacía');
         }
         var archivo: string = rutaDelArchivoDeUsuarios();
-        await agregarUsuario(archivo, argumentos[0], contrasena);
+        await agregarUsuario(archivo, argumentos[0], contrasena, leerParametrosScram());
         console.log('usuario ' + argumentos[0] + ' dado de alta en ' + archivo);
     } finally {
         lector.close();

@@ -1,30 +1,24 @@
-import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { generarVerificador, verificarContrasena, type ParametrosScram } from './scram.ts';
 
-const LONGITUD_DEL_HASH: number = 64;
-const LONGITUD_DE_LA_SAL: number = 16;
+/**
+ * Usuarios y contraseñas se limitan a ASCII imprimible. Así el verificador SCRAM coincide
+ * con el que calcula PostgreSQL sin necesidad de aplicar SASLprep.
+ */
+const ASCII_IMPRIMIBLE: RegExp = /^[\x20-\x7E]+$/;
 
 export interface UsuarioAlmacenado {
     readonly usuario: string;
-    readonly sal: string;
-    readonly hash: string;
+    readonly verificador: string;
 }
 
 interface ArchivoDeUsuarios {
     readonly usuarios: readonly UsuarioAlmacenado[];
 }
 
-function derivarHash(contrasena: string, sal: Buffer): Promise<Buffer> {
-    return new Promise<Buffer>(function (resolver: (valor: Buffer) => void, rechazar: (error: Error) => void): void {
-        scrypt(contrasena, sal, LONGITUD_DEL_HASH, function (error: Error | null, derivado: Buffer): void {
-            if (error != null) {
-                rechazar(error);
-                return;
-            }
-            resolver(derivado);
-        });
-    });
+export function esAsciiImprimible(texto: string): boolean {
+    return ASCII_IMPRIMIBLE.test(texto);
 }
 
 function esArchivoDeUsuarios(contenido: unknown): contenido is ArchivoDeUsuarios {
@@ -34,8 +28,7 @@ function esArchivoDeUsuarios(contenido: unknown): contenido is ArchivoDeUsuarios
     return usuarios.every(function (usuario: unknown): boolean {
         if (typeof usuario !== 'object' || usuario === null) return false;
         return typeof Reflect.get(usuario, 'usuario') === 'string'
-            && typeof Reflect.get(usuario, 'sal') === 'string'
-            && typeof Reflect.get(usuario, 'hash') === 'string';
+            && typeof Reflect.get(usuario, 'verificador') === 'string';
     });
 }
 
@@ -57,37 +50,34 @@ export async function leerUsuarios(archivo: string): Promise<readonly UsuarioAlm
 }
 
 /**
- * Verifica usuario y contraseña. Cuando el usuario no existe igual calcula un hash
- * descartable, para que el tiempo de respuesta no revele qué usuarios están dados de alta.
+ * Verifica usuario y contraseña. Cuando el usuario no existe (o no es ASCII imprimible) igual
+ * calcula un verificador descartable, para que el tiempo de respuesta no revele qué usuarios
+ * están dados de alta.
  */
-export async function verificarCredenciales(archivo: string, usuario: string, contrasena: string): Promise<boolean> {
+export async function verificarCredenciales(archivo: string, usuario: string, contrasena: string, parametros: ParametrosScram): Promise<boolean> {
     var usuarios: readonly UsuarioAlmacenado[] = await leerUsuarios(archivo);
     var encontrado: UsuarioAlmacenado | undefined = usuarios.find(function (candidato: UsuarioAlmacenado): boolean {
         return candidato.usuario === usuario;
     });
-    if (encontrado == null) {
-        await derivarHash(contrasena, randomBytes(LONGITUD_DE_LA_SAL));
+    if (encontrado == null || !esAsciiImprimible(usuario) || !esAsciiImprimible(contrasena)) {
+        await generarVerificador(contrasena, parametros);
         return false;
     }
-    var esperado: Buffer = Buffer.from(encontrado.hash, 'base64');
-    var obtenido: Buffer = await derivarHash(contrasena, Buffer.from(encontrado.sal, 'base64'));
-    if (esperado.length !== obtenido.length) {
-        return false;
-    }
-    return timingSafeEqual(esperado, obtenido);
+    return verificarContrasena(contrasena, encontrado.verificador);
 }
 
-export async function agregarUsuario(archivo: string, usuario: string, contrasena: string): Promise<void> {
+export async function agregarUsuario(archivo: string, usuario: string, contrasena: string, parametros: ParametrosScram): Promise<void> {
+    if (!esAsciiImprimible(usuario) || !esAsciiImprimible(contrasena)) {
+        throw new Error('El usuario y la contraseña solo pueden tener caracteres ASCII imprimibles');
+    }
     var usuarios: readonly UsuarioAlmacenado[] = await leerUsuarios(archivo);
     if (usuarios.some(function (candidato: UsuarioAlmacenado): boolean { return candidato.usuario === usuario; })) {
         throw new Error('El usuario ' + usuario + ' ya existe');
     }
-    var sal: Buffer = randomBytes(LONGITUD_DE_LA_SAL);
-    var hash: Buffer = await derivarHash(contrasena, sal);
+    var verificador: string = await generarVerificador(contrasena, parametros);
     var nuevos: UsuarioAlmacenado[] = usuarios.concat([{
         usuario: usuario,
-        sal: sal.toString('base64'),
-        hash: hash.toString('base64'),
+        verificador: verificador,
     }]);
     var contenido: ArchivoDeUsuarios = { usuarios: nuevos };
     await mkdir(dirname(archivo), { recursive: true });
