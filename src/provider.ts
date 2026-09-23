@@ -4,6 +4,7 @@ import Provider, {
     type AccountClaims,
     type ClientCredentials,
     type AccessToken,
+    type AdapterFactory,
     type Configuration,
     type Interaction,
     type JWKS,
@@ -15,11 +16,11 @@ import type { Config } from './config.ts';
 import { escapeHtml } from './interactions.ts';
 import { createFetchWithInternalDestinations } from './internal-fetch.ts';
 import { lang, messages } from './messages.ts';
-import { readUsers, type StoredUser } from './users.ts';
+import type { UserStore } from './stores.ts';
 
 const OPENID_SCOPE: string = 'openid';
 
-export function createProvider(config: Config, keySet: JWKS): Provider {
+export function createProvider(config: Config, keySet: JWKS, userStore: UserStore, adapter: AdapterFactory): Provider {
     var providerConfiguration: Configuration = {
         clients: [{
             client_id: config.clientId,
@@ -36,6 +37,7 @@ export function createProvider(config: Config, keySet: JWKS): Provider {
             post_logout_redirect_uris: [config.postLogoutRedirectUri],
         }],
         jwks: keySet,
+        adapter: adapter,
         // Back-channel notifications go to services on the internal network; see internal-fetch.ts.
         fetch: createFetchWithInternalDestinations([config.backchannelLogoutUri]),
         cookies: {
@@ -93,11 +95,7 @@ export function createProvider(config: Config, keySet: JWKS): Provider {
             },
         },
         findAccount: async function (_context: KoaContextWithOIDC, accountId: string): Promise<Account | undefined> {
-            var users: readonly StoredUser[] = await readUsers(config.usersFile);
-            var exists: boolean = users.some(function (user: StoredUser): boolean {
-                return user.username === accountId;
-            });
-            if (!exists) {
+            if (!await userStore.exists(accountId)) {
                 return undefined;
             }
             return {

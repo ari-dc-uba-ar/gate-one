@@ -3,6 +3,7 @@ import type Provider from 'oidc-provider';
 import type { Interaction, InteractionResults } from 'oidc-provider';
 import type { Config } from './config.ts';
 import { formatMessage, lang, messages } from './messages.ts';
+import type { UserStore } from './stores.ts';
 import { verifyCredentials } from './users.ts';
 
 type Handler = (request: Request<{ uid: string }, string, unknown>, response: Response) => Promise<void>;
@@ -58,7 +59,7 @@ function sendHtml(response: Response, status: number, html: string): void {
     response.send(html);
 }
 
-export function createInteractionRoutes(provider: Provider, config: Config): Router {
+export function createInteractionRoutes(provider: Provider, config: Config, userStore: UserStore): Router {
     var routes: Router = express.Router();
     var formBody = express.urlencoded({ extended: false });
 
@@ -79,7 +80,7 @@ export function createInteractionRoutes(provider: Provider, config: Config): Rou
             sendHtml(response, 400, loginPage(interaction.uid, '', messages.missingFields));
             return;
         }
-        var valid: boolean = await verifyCredentials(config.usersFile, username, password, config.scramParameters);
+        var valid: boolean = await verifyCredentials(userStore, username, password, config.scramParameters);
         if (!valid) {
             sendHtml(response, 401, loginPage(interaction.uid, username, messages.invalidCredentials));
             return;

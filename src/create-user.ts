@@ -1,6 +1,8 @@
 import { createInterface, type Interface } from 'node:readline/promises';
-import { readLang, readScramParameters, usersFilePath } from './config.ts';
+import type { Pool } from 'pg';
+import { readLang, readScramParameters } from './config.ts';
 import { formatMessage, messages, setLang } from './messages.ts';
+import { createPgUserStore, createPool } from './pg-stores.ts';
 import { addUser } from './users.ts';
 
 /**
@@ -14,16 +16,17 @@ async function main(): Promise<void> {
         throw new Error(messages.createUserUsage);
     }
     var reader: Interface = createInterface({ input: process.stdin, output: process.stderr });
+    var pool: Pool = createPool();
     try {
         var password: string = await reader.question(messages.passwordPrompt);
         if (password === '') {
             throw new Error(messages.passwordEmpty);
         }
-        var file: string = usersFilePath();
-        await addUser(file, args[0], password, readScramParameters());
-        console.log(formatMessage(messages.userCreated, args[0], file));
+        await addUser(createPgUserStore(pool), args[0], password, readScramParameters());
+        console.log(formatMessage(messages.userCreated, args[0]));
     } finally {
         reader.close();
+        await pool.end();
     }
 }
 

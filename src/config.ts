@@ -1,4 +1,3 @@
-import { resolve } from 'node:path';
 import { formatMessage, messages } from './messages.ts';
 import { POSTGRES_SCRAM_PARAMETERS, type ScramParameters } from './scram.ts';
 
@@ -14,8 +13,6 @@ export interface Config {
     readonly serviceResource: string;
     readonly resourceScope: string;
     readonly accessTokenTtlSeconds: number;
-    readonly usersFile: string;
-    readonly keysFile: string;
     readonly scramParameters: ScramParameters;
 }
 
@@ -45,14 +42,6 @@ function numericVariable(name: string, defaultValue: number): number {
         throw new Error(formatMessage(messages.envVarMustBePositiveInteger, name));
     }
     return number;
-}
-
-export function usersFilePath(): string {
-    return resolve(process.cwd(), 'data', 'users.json');
-}
-
-export function keysFilePath(): string {
-    return resolve(process.cwd(), 'data', 'jwks.json');
 }
 
 /** Language of the messages (see messages.ts). */
@@ -88,8 +77,6 @@ export function readConfig(): Config {
         serviceResource: optionalVariable('AUTH_RESOURCE', 'http://localhost:3004/api'),
         resourceScope: optionalVariable('AUTH_SCOPE', 'perfil:leer'),
         accessTokenTtlSeconds: numericVariable('AUTH_ACCESS_TOKEN_TTL', 600),
-        usersFile: usersFilePath(),
-        keysFile: keysFilePath(),
         scramParameters: readScramParameters(),
     };
 }
