@@ -5,9 +5,15 @@
 create schema gate_one;
 
 -- Usernames are limited to printable ASCII (see src/users.ts).
+-- The profile columns are the minimum for the standard claims of the profile and email scopes
+-- (username is preferred_username; name is given_name followed by family_name).
 create table gate_one.users (
     username text primary key check (username ~ '^[ -~]+$'),
     verifier text not null check (verifier like 'SCRAM-SHA-256$%'),
+    given_name text not null check (btrim(given_name) <> ''),
+    family_name text not null check (btrim(family_name) <> ''),
+    email text check (email ~ '^[^@\s]+@[^@\s]+$'),
+    email_verified boolean not null default false,
     created_at timestamptz not null default current_timestamp
 );
 

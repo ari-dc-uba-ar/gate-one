@@ -16,9 +16,10 @@ import type { Config } from './config.ts';
 import { escapeHtml } from './interactions.ts';
 import { createFetchWithInternalDestinations } from './internal-fetch.ts';
 import { lang, messages } from './messages.ts';
-import type { UserStore } from './stores.ts';
+import type { UserProfile, UserStore } from './stores.ts';
 
-const OPENID_SCOPE: string = 'openid';
+/** Every client gets the standard OIDC scopes; the claims each one carries are in `claims` below. */
+const OIDC_SCOPES: string = 'openid profile email';
 
 export function createProvider(config: Config, keySet: JWKS, userStore: UserStore, adapter: AdapterFactory): Provider {
     var providerConfiguration: Configuration = {
@@ -38,6 +39,13 @@ export function createProvider(config: Config, keySet: JWKS, userStore: UserStor
         }],
         jwks: keySet,
         adapter: adapter,
+        claims: {
+            openid: ['sub'],
+            profile: ['name', 'given_name', 'family_name', 'preferred_username'],
+            email: ['email', 'email_verified'],
+        },
+        // Like Entra ID and Google, the ID token carries the claims of the requested scopes.
+        conformIdTokenClaims: false,
         // Back-channel notifications go to services on the internal network; see internal-fetch.ts.
         fetch: createFetchWithInternalDestinations([config.backchannelLogoutUri]),
         cookies: {
@@ -95,13 +103,25 @@ export function createProvider(config: Config, keySet: JWKS, userStore: UserStor
             },
         },
         findAccount: async function (_context: KoaContextWithOIDC, accountId: string): Promise<Account | undefined> {
-            if (!await userStore.exists(accountId)) {
+            var profile: UserProfile | undefined = await userStore.findProfile(accountId);
+            if (profile == null) {
                 return undefined;
+            }
+            var claims: AccountClaims = {
+                sub: accountId,
+                name: profile.givenName + ' ' + profile.familyName,
+                given_name: profile.givenName,
+                family_name: profile.familyName,
+                preferred_username: accountId,
+            };
+            if (profile.email != null) {
+                claims.email = profile.email;
+                claims.email_verified = profile.emailVerified;
             }
             return {
                 accountId: accountId,
                 claims: function (): AccountClaims {
-                    return { sub: accountId };
+                    return claims;
                 },
             };
         },
@@ -123,7 +143,7 @@ export function createProvider(config: Config, keySet: JWKS, userStore: UserStor
                 clientId: client.clientId,
                 accountId: session.accountId,
             });
-            grant.addOIDCScope(OPENID_SCOPE);
+            grant.addOIDCScope(OIDC_SCOPES);
             grant.addResourceScope(config.serviceResource, config.resourceScope);
             await grant.save();
             return grant;
