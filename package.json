@@ -16,8 +16,11 @@
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
+    "@types/mocha": "^10.0.10",
     "@types/node": "^26.6.2",
     "@types/oidc-provider": "^9.12.1",
+    "c8": "^12.0.0",
+    "mocha": "^12.0.2",
     "qa-control": "^0.11.3",
     "typescript": "^7.0.2"
   },
@@ -29,8 +32,8 @@
     "build": "tsc",
     "start": "node --env-file=.env dist/servidor.js",
     "crear-usuario": "node --env-file=.env dist/crear-usuario.js",
-    "test": "echo faltan los tests",
-    "test-ci": "echo faltan los tests que producen coverage/.lcov"
+    "test": "tsc -p tsconfig.test.json && mocha \"dist-test/test/**/*.js\"",
+    "test-ci": "tsc -p tsconfig.test.json && c8 --reporter=lcov --reporter=text mocha \"dist-test/test/**/*.js\""
   },
   "qa-control": {
     "run-in": "server",
