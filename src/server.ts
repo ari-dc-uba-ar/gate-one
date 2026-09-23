@@ -48,11 +48,19 @@ async function main(): Promise<void> {
         response.send(messages.internalError);
     });
 
-    scheduleExpiredCleanup(pool);
-    app.listen(config.port, function (): void {
-        console.log(formatMessage(messages.listeningOn, config.issuer));
-        console.log(formatMessage(messages.oidcConfigurationAt, config.issuer + '/.well-known/openid-configuration'));
+    // Express 5 passes listen errors (for example, a port in use) to the callback.
+    await new Promise<void>(function (resolve: () => void, reject: (error: Error) => void): void {
+        app.listen(config.port, function (error?: Error): void {
+            if (error != null) {
+                reject(error);
+                return;
+            }
+            resolve();
+        });
     });
+    scheduleExpiredCleanup(pool);
+    console.log(formatMessage(messages.listeningOn, config.issuer));
+    console.log(formatMessage(messages.oidcConfigurationAt, config.issuer + '/.well-known/openid-configuration'));
 }
 
 main().catch(function (error: unknown): void {
