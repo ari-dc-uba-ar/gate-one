@@ -85,7 +85,8 @@ export function createInteractionRoutes(provider: Provider, config: Config, user
             sendHtml(response, 401, loginPage(interaction.uid, username, messages.invalidCredentials));
             return;
         }
-        var result: InteractionResults = { login: { accountId: username } };
+        // remember: false makes the session cookie transient: it goes away when the browser is closed.
+        var result: InteractionResults = { login: { accountId: username, remember: false } };
         await provider.interactionFinished(request, response, result, { mergeWithLastSubmission: false });
     }));
 

@@ -21,6 +21,11 @@ import { createFetchWithInternalDestinations } from './internal-fetch.ts';
 import { lang, messages } from './messages.ts';
 import type { ClientRecord, ClientResource, ClientStore, UserProfile, UserStore } from './stores.ts';
 
+const INTERACTION_TTL_SECONDS: number = 30 * 60;
+const ID_TOKEN_TTL_SECONDS: number = 10 * 60;
+/** Access tokens for an API take its lifetime from gate_one.resource_servers; this is for any other. */
+const DEFAULT_ACCESS_TOKEN_TTL_SECONDS: number = 10 * 60;
+
 /** Every client gets the standard OIDC scopes; the claims each one carries are in `claims` below. */
 const OIDC_SCOPES: string = 'openid profile email';
 
@@ -89,6 +94,21 @@ export function createProvider(config: Config, keySet: JWKS, userStore: UserStor
         fetch: createFetchWithInternalDestinations(clientStore.isBackchannelLogoutUri),
         cookies: {
             keys: config.cookieKeys,
+        },
+        /**
+         * The session lasts a working day, and its cookie goes away when the browser is closed
+         * (see remember: false in interactions.ts), because of shared computers.
+         * The grant lives as long as the session. Clients only have the authorization_code
+         * grant type, so no refresh tokens are issued.
+         */
+        ttl: {
+            Interaction: INTERACTION_TTL_SECONDS,
+            Session: config.sessionTtlSeconds,
+            Grant: config.sessionTtlSeconds,
+            IdToken: ID_TOKEN_TTL_SECONDS,
+            AccessToken: function (_context: KoaContextWithOIDC, token: AccessToken): number {
+                return token.resourceServer?.accessTokenTTL ?? DEFAULT_ACCESS_TOKEN_TTL_SECONDS;
+            },
         },
         pkce: {
             required: function (): boolean { return true; },

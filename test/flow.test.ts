@@ -30,6 +30,7 @@ function freePort(): Promise<number> {
 /** A browser reduced to what the flow needs: cookies and manual redirects. */
 class Browser {
     private readonly cookies: Map<string, string> = new Map<string, string>();
+    readonly setCookieHeaders: string[] = [];
 
     async request(url: string, options: RequestInit = {}): Promise<Response> {
         var headers: Headers = new Headers(options.headers);
@@ -37,6 +38,7 @@ class Browser {
             return name + '=' + value;
         }).join('; '));
         var response: Response = await fetch(url, { ...options, headers: headers, redirect: 'manual' });
+        this.setCookieHeaders.push(...response.headers.getSetCookie());
         response.headers.getSetCookie().forEach((cookie: string): void => {
             var pair: string = cookie.split(';')[0];
             var separator: number = pair.indexOf('=');
@@ -73,7 +75,7 @@ describe('authorization code flow', function (): void {
         await addUser(users, 'ana', 'ana password', { givenName: 'Ana', familyName: 'Muñoz', email: 'ana@example.com', emailVerified: false }, POSTGRES_SCRAM_PARAMETERS);
         var port: number = await freePort();
         issuer = 'http://localhost:' + port;
-        var app: Express = await createApp({ issuer: issuer, port: port, cookieKeys: ['test-key'], scramParameters: POSTGRES_SCRAM_PARAMETERS }, {
+        var app: Express = await createApp({ issuer: issuer, port: port, cookieKeys: ['test-key'], sessionTtlSeconds: 8 * 60 * 60, scramParameters: POSTGRES_SCRAM_PARAMETERS }, {
             users: users,
             clients: createPgClientStore(pool),
             signingKeys: createPgSigningKeyStore(pool),
@@ -165,6 +167,25 @@ describe('authorization code flow', function (): void {
         assert.equal(typeof Reflect.get(access, 'sid'), 'string');
         assert.equal(Reflect.get(access, 'sid'), Reflect.get(id, 'sid'));
         assert.equal(Number(access.exp) - Number(access.iat), 300);
+        assert.equal(Number(id.exp) - Number(id.iat), 600);
+    });
+
+    it('keeps the session 8 hours, with a cookie that ends with the browser', async function (): Promise<void> {
+        var browser: Browser = new Browser();
+        var resume: string = location(await signIn(browser, 'v'.repeat(43), 'ana password'), issuer);
+        await browser.request(resume);
+        var sessionCookie: string | undefined = browser.setCookieHeaders.find(function (header: string): boolean {
+            return header.startsWith('_session=');
+        });
+        assert.ok(sessionCookie != null);
+        assert.doesNotMatch(sessionCookie, /expires=|max-age=/i);
+        var result = await pool.query<{ seconds: number }>(
+            "select extract(epoch from expires_at - current_timestamp)::integer as seconds from gate_one.oidc_models where model = 'Session'"
+        );
+        assert.ok(result.rows.length > 0);
+        result.rows.forEach(function (row: { seconds: number }): void {
+            assert.ok(row.seconds > 8 * 60 * 60 - 60 && row.seconds <= 8 * 60 * 60, 'session expires in ' + row.seconds + ' seconds');
+        });
     });
 
     it('refuses an API the client is not allowed to use', async function (): Promise<void> {

@@ -5,6 +5,7 @@ export interface Config {
     readonly issuer: string;
     readonly port: number;
     readonly cookieKeys: readonly string[];
+    readonly sessionTtlSeconds: number;
     readonly scramParameters: ScramParameters;
 }
 
@@ -61,6 +62,7 @@ export function readConfig(): Config {
         issuer: optionalVariable('AUTH_ISSUER', 'http://localhost:3993'),
         port: numericVariable('AUTH_PORT', 3993),
         cookieKeys: cookieKeys,
+        sessionTtlSeconds: numericVariable('AUTH_SESSION_TTL', 8 * 60 * 60),
         scramParameters: readScramParameters(),
     };
 }

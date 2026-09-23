@@ -10,4 +10,4 @@ jobs:
   ci:
     uses: codenautas/.github/.github/workflows/node-build-and-test.yaml@v2
     with:
-      postgres: true
+      postgres: lts
