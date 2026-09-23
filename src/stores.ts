@@ -24,3 +24,26 @@ export interface SigningKeyStore {
     list(): Promise<JWK[]>;
     add(key: JWK): Promise<void>;
 }
+
+export interface ClientRecord {
+    readonly clientId: string;
+    readonly clientSecret: string;
+    readonly redirectUris: readonly string[];
+    readonly postLogoutRedirectUris: readonly string[];
+    readonly backchannelLogoutUri: string | null;
+}
+
+/** An API a client may call, with the scopes the client receives for it. */
+export interface ClientResource {
+    readonly resource: string;
+    readonly scopes: readonly string[];
+    readonly accessTokenTtl: number;
+}
+
+export interface ClientStore {
+    findClient(clientId: string): Promise<ClientRecord | undefined>;
+    /** Only the scopes that are both granted to the client and defined by the resource server. */
+    findResources(clientId: string): Promise<ClientResource[]>;
+    /** Compares the URLs normalized (as oidc-provider does before calling them). */
+    isBackchannelLogoutUri(uri: string): Promise<boolean>;
+}

@@ -4,7 +4,10 @@ import Provider, {
     type AccountClaims,
     type ClientCredentials,
     type AccessToken,
+    type Adapter,
     type AdapterFactory,
+    type AdapterPayload,
+    type Client,
     type Configuration,
     type Interaction,
     type JWKS,
@@ -16,29 +19,65 @@ import type { Config } from './config.ts';
 import { escapeHtml } from './interactions.ts';
 import { createFetchWithInternalDestinations } from './internal-fetch.ts';
 import { lang, messages } from './messages.ts';
-import type { UserProfile, UserStore } from './stores.ts';
+import type { ClientRecord, ClientResource, ClientStore, UserProfile, UserStore } from './stores.ts';
 
 /** Every client gets the standard OIDC scopes; the claims each one carries are in `claims` below. */
 const OIDC_SCOPES: string = 'openid profile email';
 
-export function createProvider(config: Config, keySet: JWKS, userStore: UserStore, adapter: AdapterFactory): Provider {
+function clientMetadata(client: ClientRecord): AdapterPayload {
+    var metadata: AdapterPayload = {
+        client_id: client.clientId,
+        client_secret: client.clientSecret,
+        grant_types: ['authorization_code'],
+        response_types: ['code'],
+        redirect_uris: [...client.redirectUris],
+        post_logout_redirect_uris: [...client.postLogoutRedirectUris],
+        token_endpoint_auth_method: 'client_secret_basic',
+        // Consistent with the key pair published in the JWKS.
+        id_token_signed_response_alg: 'ES256',
+    };
+    if (client.backchannelLogoutUri != null) {
+        metadata.backchannel_logout_uri = client.backchannelLogoutUri;
+        // Makes the logout token, the ID token and the access token carry the same sid.
+        metadata.backchannel_logout_session_required = true;
+    }
+    return metadata;
+}
+
+/** oidc-provider reads the clients through its adapter; they are only read, never written. */
+function createClientAdapter(clientStore: ClientStore): Adapter {
+    var readOnly = async function (): Promise<void> {
+        throw new Error(messages.clientsAreReadOnly);
+    };
+    return {
+        find: async function (clientId: string): Promise<AdapterPayload | undefined> {
+            var client: ClientRecord | undefined = await clientStore.findClient(clientId);
+            return client == null ? undefined : clientMetadata(client);
+        },
+        upsert: readOnly,
+        findByUserCode: readOnly,
+        findByUid: readOnly,
+        consume: readOnly,
+        destroy: readOnly,
+        revokeByGrantId: async function (): Promise<void> {
+            // Clients have no grant records.
+        },
+    };
+}
+
+async function findClientResource(clientStore: ClientStore, client: Client, resource: string): Promise<ClientResource | undefined> {
+    var resources: ClientResource[] = await clientStore.findResources(client.clientId);
+    return resources.find(function (candidate: ClientResource): boolean {
+        return candidate.resource === resource;
+    });
+}
+
+export function createProvider(config: Config, keySet: JWKS, userStore: UserStore, clientStore: ClientStore, adapter: AdapterFactory): Provider {
     var providerConfiguration: Configuration = {
-        clients: [{
-            client_id: config.clientId,
-            client_secret: config.clientSecret,
-            grant_types: ['authorization_code'],
-            response_types: ['code'],
-            redirect_uris: [config.redirectUri],
-            token_endpoint_auth_method: 'client_secret_basic',
-            // Consistent with the single key pair published in the JWKS.
-            id_token_signed_response_alg: 'ES256',
-            backchannel_logout_uri: config.backchannelLogoutUri,
-            // Makes the logout token, the ID token and the access token carry the same sid.
-            backchannel_logout_session_required: true,
-            post_logout_redirect_uris: [config.postLogoutRedirectUri],
-        }],
         jwks: keySet,
-        adapter: adapter,
+        adapter: function (model: string): Adapter {
+            return model === 'Client' ? createClientAdapter(clientStore) : adapter(model);
+        },
         claims: {
             openid: ['sub'],
             profile: ['name', 'given_name', 'family_name', 'preferred_username'],
@@ -47,7 +86,7 @@ export function createProvider(config: Config, keySet: JWKS, userStore: UserStor
         // Like Entra ID and Google, the ID token carries the claims of the requested scopes.
         conformIdTokenClaims: false,
         // Back-channel notifications go to services on the internal network; see internal-fetch.ts.
-        fetch: createFetchWithInternalDestinations([config.backchannelLogoutUri]),
+        fetch: createFetchWithInternalDestinations(clientStore.isBackchannelLogoutUri),
         cookies: {
             keys: config.cookieKeys,
         },
@@ -82,21 +121,24 @@ export function createProvider(config: Config, keySet: JWKS, userStore: UserStor
             },
             resourceIndicators: {
                 enabled: true,
-                defaultResource: function (): string {
-                    return config.serviceResource;
+                /** When the client has a single API, it does not need to send the resource parameter. */
+                defaultResource: async function (_context: KoaContextWithOIDC, client: Client): Promise<string | undefined> {
+                    var resources: ClientResource[] = await clientStore.findResources(client.clientId);
+                    return resources.length === 1 ? resources[0].resource : undefined;
                 },
                 useGrantedResource: function (): boolean {
                     return true;
                 },
-                getResourceServerInfo: function (_context: KoaContextWithOIDC, resourceIndicator: string): ResourceServer {
-                    if (resourceIndicator !== config.serviceResource) {
+                getResourceServerInfo: async function (_context: KoaContextWithOIDC, resourceIndicator: string, client: Client): Promise<ResourceServer> {
+                    var clientResource: ClientResource | undefined = await findClientResource(clientStore, client, resourceIndicator);
+                    if (clientResource == null) {
                         throw new errors.InvalidTarget(messages.resourceNotRegistered);
                     }
                     return {
-                        scope: config.resourceScope,
-                        audience: config.serviceResource,
+                        scope: clientResource.scopes.join(' '),
+                        audience: clientResource.resource,
                         accessTokenFormat: 'jwt',
-                        accessTokenTTL: config.accessTokenTtlSeconds,
+                        accessTokenTTL: clientResource.accessTokenTtl,
                         jwt: { sign: { alg: 'ES256' } },
                     };
                 },
@@ -126,8 +168,9 @@ export function createProvider(config: Config, keySet: JWKS, userStore: UserStor
             };
         },
         /**
-         * The client is first-party (same organization), so the grant is given
-         * automatically and no consent screen is shown.
+         * The clients are first-party (same organization), so the grant is given automatically
+         * and no consent screen is shown: the standard OIDC scopes plus the API scopes registered
+         * for the client (gate_one.client_resources). A grant already in the session is kept as is.
          */
         loadExistingGrant: async function (context: KoaContextWithOIDC) {
             var client = context.oidc.client;
@@ -144,7 +187,10 @@ export function createProvider(config: Config, keySet: JWKS, userStore: UserStor
                 accountId: session.accountId,
             });
             grant.addOIDCScope(OIDC_SCOPES);
-            grant.addResourceScope(config.serviceResource, config.resourceScope);
+            var resources: ClientResource[] = await clientStore.findResources(client.clientId);
+            resources.forEach(function (clientResource: ClientResource): void {
+                grant.addResourceScope(clientResource.resource, clientResource.scopes.join(' '));
+            });
             await grant.save();
             return grant;
         },

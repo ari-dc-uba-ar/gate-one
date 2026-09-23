@@ -17,6 +17,34 @@ create table gate_one.users (
     created_at timestamptz not null default current_timestamp
 );
 
+-- Registered applications (OIDC clients), like Entra ID's app registrations.
+-- client_secret is kept readable because client_secret_basic authentication compares it.
+create table gate_one.clients (
+    client_id text primary key,
+    client_secret text not null,
+    redirect_uris text[] not null check (cardinality(redirect_uris) > 0),
+    post_logout_redirect_uris text[] not null default '{}',
+    backchannel_logout_uri text,
+    created_at timestamptz not null default current_timestamp
+);
+
+-- APIs that accept gate-one access tokens. resource is the audience of the tokens (RFC 8707).
+create table gate_one.resource_servers (
+    resource text primary key,
+    scopes text[] not null check (cardinality(scopes) > 0),
+    access_token_ttl integer not null default 600 check (access_token_ttl > 0),
+    created_at timestamptz not null default current_timestamp
+);
+
+-- Which scopes of which API each client receives, already consented (like Entra ID's admin consent).
+-- Only the scopes that the resource server defines are granted.
+create table gate_one.client_resources (
+    client_id text not null references gate_one.clients,
+    resource text not null references gate_one.resource_servers,
+    scopes text[] not null check (cardinality(scopes) > 0),
+    primary key (client_id, resource)
+);
+
 -- Signing keys published in the JWKS. The jwk column holds the private key.
 create table gate_one.signing_keys (
     kid text primary key,

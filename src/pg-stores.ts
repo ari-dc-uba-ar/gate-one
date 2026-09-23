@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import type { Adapter, AdapterFactory, AdapterPayload, JWK } from 'oidc-provider';
 import { formatMessage, messages } from './messages.ts';
-import type { SigningKeyStore, UserProfile, UserStore } from './stores.ts';
+import type { ClientRecord, ClientResource, ClientStore, SigningKeyStore, UserProfile, UserStore } from './stores.ts';
 
 /**
  * The connection is configured with the standard PostgreSQL environment variables
@@ -64,6 +64,41 @@ export function createPgSigningKeyStore(pool: Pool): SigningKeyStore {
         },
         add: async function (key: JWK): Promise<void> {
             await pool.query('insert into gate_one.signing_keys (kid, jwk) values ($1, $2)', [key.kid, JSON.stringify(key)]);
+        },
+    };
+}
+
+export function createPgClientStore(pool: Pool): ClientStore {
+    return {
+        findClient: async function (clientId: string): Promise<ClientRecord | undefined> {
+            var result = await pool.query<ClientRecord>(
+                'select client_id as "clientId", client_secret as "clientSecret", redirect_uris as "redirectUris",'
+                + ' post_logout_redirect_uris as "postLogoutRedirectUris", backchannel_logout_uri as "backchannelLogoutUri"'
+                + ' from gate_one.clients where client_id = $1',
+                [clientId]
+            );
+            return result.rows.length === 0 ? undefined : result.rows[0];
+        },
+        findResources: async function (clientId: string): Promise<ClientResource[]> {
+            var result = await pool.query<ClientResource>(
+                'select r.resource, array(select unnest(cr.scopes) intersect select unnest(r.scopes) order by 1) as scopes,'
+                + ' r.access_token_ttl as "accessTokenTtl"'
+                + ' from gate_one.client_resources cr join gate_one.resource_servers r using (resource)'
+                + ' where cr.client_id = $1 order by r.resource',
+                [clientId]
+            );
+            return result.rows.filter(function (row: ClientResource): boolean {
+                return row.scopes.length > 0;
+            });
+        },
+        isBackchannelLogoutUri: async function (uri: string): Promise<boolean> {
+            var result = await pool.query<{ uri: string }>(
+                'select backchannel_logout_uri as uri from gate_one.clients where backchannel_logout_uri is not null'
+            );
+            var normalized: string = new URL(uri).href;
+            return result.rows.some(function (row: { uri: string }): boolean {
+                return new URL(row.uri).href === normalized;
+            });
         },
     };
 }

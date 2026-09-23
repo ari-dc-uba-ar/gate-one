@@ -5,14 +5,6 @@ export interface Config {
     readonly issuer: string;
     readonly port: number;
     readonly cookieKeys: readonly string[];
-    readonly clientId: string;
-    readonly clientSecret: string;
-    readonly redirectUri: string;
-    readonly backchannelLogoutUri: string;
-    readonly postLogoutRedirectUri: string;
-    readonly serviceResource: string;
-    readonly resourceScope: string;
-    readonly accessTokenTtlSeconds: number;
     readonly scramParameters: ScramParameters;
 }
 
@@ -69,14 +61,6 @@ export function readConfig(): Config {
         issuer: optionalVariable('AUTH_ISSUER', 'http://localhost:3993'),
         port: numericVariable('AUTH_PORT', 3993),
         cookieKeys: cookieKeys,
-        clientId: optionalVariable('AUTH_CLIENT_ID', 'one-entrance'),
-        clientSecret: requiredVariable('AUTH_CLIENT_SECRET'),
-        redirectUri: optionalVariable('AUTH_REDIRECT_URI', 'http://localhost:3004/callback'),
-        backchannelLogoutUri: optionalVariable('AUTH_BACKCHANNEL_LOGOUT_URI', 'http://localhost:3004/backchannel-logout'),
-        postLogoutRedirectUri: optionalVariable('AUTH_POST_LOGOUT_REDIRECT_URI', 'http://localhost:3004/'),
-        serviceResource: optionalVariable('AUTH_RESOURCE', 'http://localhost:3004/api'),
-        resourceScope: optionalVariable('AUTH_SCOPE', 'perfil:leer'),
-        accessTokenTtlSeconds: numericVariable('AUTH_ACCESS_TOKEN_TTL', 600),
         scramParameters: readScramParameters(),
     };
 }

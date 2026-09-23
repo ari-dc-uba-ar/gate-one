@@ -11,16 +11,13 @@ function urlOfInput(input: string | URL | Request): string {
  * and non publicly routable addresses (SSRF protection). That protection prevents
  * notifying services on an internal network through the back-channel.
  *
- * This function skips the protection only for the exact URLs in the list, which come
+ * This function skips the protection only for the URLs isAllowed accepts, which come
  * from the configuration of the registered clients. Any other destination keeps the protection.
  * The other options set by oidc-provider (timeout, headers) are kept.
  */
-export function createFetchWithInternalDestinations(allowedDestinations: readonly string[]): FetchFunction {
-    var allowed: Set<string> = new Set<string>(allowedDestinations.map(function (destination: string): string {
-        return new URL(destination).href;
-    }));
-    return function (input: string | URL | Request, options?: RequestInit): Promise<Response> {
-        if (!allowed.has(urlOfInput(input))) {
+export function createFetchWithInternalDestinations(isAllowed: (url: string) => Promise<boolean>): FetchFunction {
+    return async function (input: string | URL | Request, options?: RequestInit): Promise<Response> {
+        if (!await isAllowed(urlOfInput(input))) {
             return fetch(input, options);
         }
         var optionsWithoutProtection: RequestInit = { ...options, dispatcher: undefined };
