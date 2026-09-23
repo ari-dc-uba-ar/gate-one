@@ -2,14 +2,13 @@
   "name": "gate-one",
   "version": "0.1.0",
   "description": "Servidor de autenticación OpenID Connect (prototipo)",
-  "scripts": {
-    "build": "tsc",
-    "start": "node --env-file=.env dist/servidor.js",
-    "crear-usuario": "node dist/crear-usuario.js"
-  },
   "keywords": [],
+  "files": [
+    "dist"
+  ],
   "author": "",
   "license": "ISC",
+  "repository": "ari-dc-uba-ar/gate-one",
   "dependencies": {
     "express": "^5.2.1",
     "jose": "^6.2.12",
@@ -19,11 +18,28 @@
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.2",
     "@types/oidc-provider": "^9.12.1",
+    "qa-control": "^0.11.3",
     "typescript": "^7.0.2"
   },
-  "private": true,
   "type": "module",
   "engines": {
     "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node --env-file=.env dist/servidor.js",
+    "crear-usuario": "node dist/crear-usuario.js",
+    "test": "echo faltan los tests",
+    "test-ci": "echo faltan los tests que producen coverage/.lcov"
+  },
+  "qa-control": {
+    "run-in": "server",
+    "type": "lib",
+    "multilang": "no",
+    "mainDoc": "README.md",
+    "silenced": [
+      "packagejson_main_file_1_does_not_exists"
+    ],
+    "gha": "all"
   }
 }
