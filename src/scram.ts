@@ -1,95 +1,96 @@
 import { createHash, createHmac, pbkdf2, randomBytes, timingSafeEqual } from 'node:crypto';
+import { messages } from './messages.ts';
 
 /**
- * Verificadores SCRAM-SHA-256 con el mismo formato que PostgreSQL guarda en pg_authid:
- *     SCRAM-SHA-256$<iteraciones>:<sal>$<StoredKey>:<ServerKey>
- * (sal y claves en base64). Con los parámetros predeterminados, los verificadores
- * son intercambiables con los que emite PostgreSQL en un dump.
+ * SCRAM-SHA-256 verifiers in the same format PostgreSQL stores in pg_authid:
+ *     SCRAM-SHA-256$<iterations>:<salt>$<StoredKey>:<ServerKey>
+ * (salt and keys in base64). With the default parameters, the verifiers are
+ * interchangeable with the ones PostgreSQL emits in a dump.
  *
- * PostgreSQL aplica SASLprep a la contraseña antes de derivarla. Acá no se aplica:
- * para contraseñas ASCII imprimibles SASLprep no cambia nada, y gate-one solo acepta esas.
+ * PostgreSQL applies SASLprep to the password before deriving it. It is not applied here:
+ * SASLprep changes nothing for printable ASCII passwords, and gate-one only accepts those.
  */
 
-const PREFIJO: string = 'SCRAM-SHA-256';
-const LONGITUD_DE_LA_CLAVE: number = 32;
-const FORMATO: RegExp = /^SCRAM-SHA-256\$([0-9]+):([A-Za-z0-9+/]+={0,2})\$([A-Za-z0-9+/]+={0,2}):([A-Za-z0-9+/]+={0,2})$/;
+const PREFIX: string = 'SCRAM-SHA-256';
+const KEY_LENGTH: number = 32;
+const FORMAT: RegExp = /^SCRAM-SHA-256\$([0-9]+):([A-Za-z0-9+/]+={0,2})\$([A-Za-z0-9+/]+={0,2}):([A-Za-z0-9+/]+={0,2})$/;
 
-export interface ParametrosScram {
-    readonly iteraciones: number;
-    readonly longitudDeLaSal: number;
+export interface ScramParameters {
+    readonly iterations: number;
+    readonly saltLength: number;
 }
 
-/** Los valores predeterminados de PostgreSQL (scram_iterations y SCRAM_DEFAULT_SALT_LEN). */
-export const PARAMETROS_SCRAM_DE_POSTGRES: ParametrosScram = {
-    iteraciones: 4096,
-    longitudDeLaSal: 16,
+/** PostgreSQL defaults (scram_iterations and SCRAM_DEFAULT_SALT_LEN). */
+export const POSTGRES_SCRAM_PARAMETERS: ScramParameters = {
+    iterations: 4096,
+    saltLength: 16,
 };
 
-interface VerificadorScram {
-    readonly iteraciones: number;
-    readonly sal: Buffer;
-    readonly claveAlmacenada: Buffer;
-    readonly claveDelServidor: Buffer;
+interface ScramVerifier {
+    readonly iterations: number;
+    readonly salt: Buffer;
+    readonly storedKey: Buffer;
+    readonly serverKey: Buffer;
 }
 
-function derivarContrasena(contrasena: string, sal: Buffer, iteraciones: number): Promise<Buffer> {
-    return new Promise<Buffer>(function (resolver: (valor: Buffer) => void, rechazar: (error: Error) => void): void {
-        pbkdf2(contrasena, sal, iteraciones, LONGITUD_DE_LA_CLAVE, 'sha256', function (error: Error | null, derivada: Buffer): void {
+function derivePassword(password: string, salt: Buffer, iterations: number): Promise<Buffer> {
+    return new Promise<Buffer>(function (resolve: (value: Buffer) => void, reject: (error: Error) => void): void {
+        pbkdf2(password, salt, iterations, KEY_LENGTH, 'sha256', function (error: Error | null, derived: Buffer): void {
             if (error != null) {
-                rechazar(error);
+                reject(error);
                 return;
             }
-            resolver(derivada);
+            resolve(derived);
         });
     });
 }
 
-function hmac(clave: Buffer, texto: string): Buffer {
-    return createHmac('sha256', clave).update(texto).digest();
+function hmac(key: Buffer, text: string): Buffer {
+    return createHmac('sha256', key).update(text).digest();
 }
 
-async function calcularClaves(contrasena: string, sal: Buffer, iteraciones: number): Promise<{ claveAlmacenada: Buffer, claveDelServidor: Buffer }> {
-    var contrasenaSalada: Buffer = await derivarContrasena(contrasena, sal, iteraciones);
-    var claveDelCliente: Buffer = hmac(contrasenaSalada, 'Client Key');
+async function computeKeys(password: string, salt: Buffer, iterations: number): Promise<{ storedKey: Buffer, serverKey: Buffer }> {
+    var saltedPassword: Buffer = await derivePassword(password, salt, iterations);
+    var clientKey: Buffer = hmac(saltedPassword, 'Client Key');
     return {
-        claveAlmacenada: createHash('sha256').update(claveDelCliente).digest(),
-        claveDelServidor: hmac(contrasenaSalada, 'Server Key'),
+        storedKey: createHash('sha256').update(clientKey).digest(),
+        serverKey: hmac(saltedPassword, 'Server Key'),
     };
 }
 
-function analizarVerificador(texto: string): VerificadorScram {
-    var partes: RegExpExecArray | null = FORMATO.exec(texto);
-    if (partes == null) {
-        throw new Error('El verificador no tiene el formato ' + PREFIJO + '$<iteraciones>:<sal>$<StoredKey>:<ServerKey>');
+function parseVerifier(text: string): ScramVerifier {
+    var parts: RegExpExecArray | null = FORMAT.exec(text);
+    if (parts == null) {
+        throw new Error(messages.scramInvalidFormat);
     }
-    var iteraciones: number = Number(partes[1]);
-    var sal: Buffer = Buffer.from(partes[2], 'base64');
-    var claveAlmacenada: Buffer = Buffer.from(partes[3], 'base64');
-    var claveDelServidor: Buffer = Buffer.from(partes[4], 'base64');
-    if (!Number.isSafeInteger(iteraciones) || iteraciones <= 0) {
-        throw new Error('El verificador ' + PREFIJO + ' tiene una cantidad de iteraciones inválida');
+    var iterations: number = Number(parts[1]);
+    var salt: Buffer = Buffer.from(parts[2], 'base64');
+    var storedKey: Buffer = Buffer.from(parts[3], 'base64');
+    var serverKey: Buffer = Buffer.from(parts[4], 'base64');
+    if (!Number.isSafeInteger(iterations) || iterations <= 0) {
+        throw new Error(messages.scramInvalidIterations);
     }
-    if (claveAlmacenada.length !== LONGITUD_DE_LA_CLAVE || claveDelServidor.length !== LONGITUD_DE_LA_CLAVE) {
-        throw new Error('El verificador ' + PREFIJO + ' tiene claves de longitud inválida');
+    if (storedKey.length !== KEY_LENGTH || serverKey.length !== KEY_LENGTH) {
+        throw new Error(messages.scramInvalidKeyLength);
     }
-    return { iteraciones: iteraciones, sal: sal, claveAlmacenada: claveAlmacenada, claveDelServidor: claveDelServidor };
+    return { iterations: iterations, salt: salt, storedKey: storedKey, serverKey: serverKey };
 }
 
-export async function generarVerificador(contrasena: string, parametros: ParametrosScram): Promise<string> {
-    var sal: Buffer = randomBytes(parametros.longitudDeLaSal);
-    var claves = await calcularClaves(contrasena, sal, parametros.iteraciones);
-    return PREFIJO + '$' + parametros.iteraciones + ':' + sal.toString('base64')
-        + '$' + claves.claveAlmacenada.toString('base64') + ':' + claves.claveDelServidor.toString('base64');
+export async function generateVerifier(password: string, parameters: ScramParameters): Promise<string> {
+    var salt: Buffer = randomBytes(parameters.saltLength);
+    var keys = await computeKeys(password, salt, parameters.iterations);
+    return PREFIX + '$' + parameters.iterations + ':' + salt.toString('base64')
+        + '$' + keys.storedKey.toString('base64') + ':' + keys.serverKey.toString('base64');
 }
 
 /**
- * Indica si la contraseña corresponde al verificador. Si el verificador está mal formado
- * lanza una excepción: es un error en los datos guardados, no una contraseña incorrecta.
+ * Tells whether the password matches the verifier. A malformed verifier throws:
+ * it is an error in the stored data, not a wrong password.
  */
-export async function verificarContrasena(contrasena: string, verificador: string): Promise<boolean> {
-    var esperado: VerificadorScram = analizarVerificador(verificador);
-    var obtenido = await calcularClaves(contrasena, esperado.sal, esperado.iteraciones);
-    var coincideLaAlmacenada: boolean = timingSafeEqual(obtenido.claveAlmacenada, esperado.claveAlmacenada);
-    var coincideLaDelServidor: boolean = timingSafeEqual(obtenido.claveDelServidor, esperado.claveDelServidor);
-    return coincideLaAlmacenada && coincideLaDelServidor;
+export async function verifyPassword(password: string, verifier: string): Promise<boolean> {
+    var expected: ScramVerifier = parseVerifier(verifier);
+    var obtained = await computeKeys(password, expected.salt, expected.iterations);
+    var storedKeyMatches: boolean = timingSafeEqual(obtained.storedKey, expected.storedKey);
+    var serverKeyMatches: boolean = timingSafeEqual(obtained.serverKey, expected.serverKey);
+    return storedKeyMatches && serverKeyMatches;
 }

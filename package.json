@@ -1,7 +1,7 @@
 {
   "name": "gate-one",
   "version": "0.1.0",
-  "description": "Servidor de autenticación OpenID Connect (prototipo)",
+  "description": "OpenID Connect authentication server (prototype)",
   "keywords": [],
   "files": [
     "dist"
@@ -30,8 +30,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "start": "node --env-file=.env dist/servidor.js",
-    "crear-usuario": "node --env-file=.env dist/crear-usuario.js",
+    "start": "node --env-file=.env dist/server.js",
+    "create-user": "node --env-file=.env dist/create-user.js",
     "test": "tsc -p tsconfig.test.json && mocha \"dist-test/test/**/*.js\"",
     "test-ci": "tsc -p tsconfig.test.json && c8 --reporter=lcov --reporter=text mocha \"dist-test/test/**/*.js\""
   },
