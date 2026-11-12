@@ -4,6 +4,9 @@
 
 grant usage on schema gate_one to :"app_role";
 grant select, insert on gate_one.users to :"app_role";
+grant update (totp_secret, totp_last_step) on gate_one.users to :"app_role";
+grant select, insert, delete on gate_one.trusted_devices to :"app_role";
+grant select, insert, update, delete on gate_one.auth_failures to :"app_role";
 grant select, insert on gate_one.signing_keys to :"app_role";
 grant select on gate_one.clients, gate_one.resource_servers, gate_one.client_resources to :"app_role";
 grant select, insert, update, delete on gate_one.oidc_models to :"app_role";

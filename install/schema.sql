@@ -14,7 +14,28 @@ create table gate_one.users (
     family_name text not null check (btrim(family_name) <> ''),
     email text check (email ~ '^[^@\s]+@[^@\s]+$'),
     email_verified boolean not null default false,
+    -- Second factor (TOTP, RFC 6238). The secret is encrypted with AUTH_TOTP_KEY (see src/totp.ts);
+    -- totp_last_step is the last 30 second step used, so a code cannot be used twice.
+    totp_secret text,
+    totp_last_step bigint,
     created_at timestamptz not null default current_timestamp
+);
+
+-- Devices where the user chose not to enter the second factor for a while. The cookie holds a random
+-- token; only its SHA-256 hash is stored here.
+create table gate_one.trusted_devices (
+    token_hash text primary key,
+    username text not null references gate_one.users on delete cascade,
+    expires_at timestamptz not null
+);
+
+create index trusted_devices_username on gate_one.trusted_devices (username);
+
+-- Failed sign-in attempts, by username ('user:...') and by IP address ('ip:...'); see src/rate-limit.ts.
+create table gate_one.auth_failures (
+    key text primary key,
+    window_start timestamptz not null,
+    failures integer not null
 );
 
 -- Registered applications (OIDC clients), like Entra ID's app registrations.

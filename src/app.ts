@@ -6,10 +6,12 @@ import { createInteractionRoutes } from './interactions.ts';
 import { getKeySet } from './keys.ts';
 import { formatMessage, messages } from './messages.ts';
 import { createProvider } from './provider.ts';
-import type { ClientStore, SigningKeyStore, UserStore } from './stores.ts';
+import type { ClientStore, FailureStore, SigningKeyStore, TrustedDeviceStore, UserStore } from './stores.ts';
 
 export interface Stores {
     readonly users: UserStore;
+    readonly trustedDevices: TrustedDeviceStore;
+    readonly failures: FailureStore;
     readonly clients: ClientStore;
     readonly signingKeys: SigningKeyStore;
     readonly oidcAdapter: AdapterFactory;
@@ -31,7 +33,7 @@ export async function createApp(config: Config, stores: Stores): Promise<Express
     });
 
     var app: Express = express();
-    app.use(createInteractionRoutes(provider, config, stores.users));
+    app.use(createInteractionRoutes(provider, config, stores));
     app.use(provider.callback());
     app.use(function (error: unknown, _request: Request, response: Response, _next: NextFunction): void {
         console.error(messages.unhandledError, error);

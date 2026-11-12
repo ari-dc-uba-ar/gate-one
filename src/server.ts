@@ -6,17 +6,23 @@ import { formatMessage, messages, setLang } from './messages.ts';
 import {
     createPgAdapterFactory,
     createPgClientStore,
+    createPgFailureStore,
     createPgSigningKeyStore,
+    createPgTrustedDeviceStore,
     createPgUserStore,
     createPool,
     deleteExpiredModels,
+    deleteExpiredSecurityRecords,
 } from './pg-stores.ts';
+import { FAILURE_WINDOW_SECONDS } from './rate-limit.ts';
 
 const EXPIRED_CLEANUP_INTERVAL_MS: number = 10 * 60 * 1000;
 
 function scheduleExpiredCleanup(pool: Pool): void {
     setInterval(function (): void {
-        deleteExpiredModels(pool).catch(function (error: unknown): void {
+        deleteExpiredModels(pool).then(function (): Promise<void> {
+            return deleteExpiredSecurityRecords(pool, FAILURE_WINDOW_SECONDS);
+        }).catch(function (error: unknown): void {
             console.error(messages.expiredCleanupFailed, error);
         });
     }, EXPIRED_CLEANUP_INTERVAL_MS);
@@ -28,6 +34,8 @@ async function main(): Promise<void> {
     var pool: Pool = createPool();
     var app: Express = await createApp(config, {
         users: createPgUserStore(pool),
+        trustedDevices: createPgTrustedDeviceStore(pool),
+        failures: createPgFailureStore(pool),
         clients: createPgClientStore(pool),
         signingKeys: createPgSigningKeyStore(pool),
         oidcAdapter: createPgAdapterFactory(pool),
