@@ -16,13 +16,23 @@ async function main(): Promise<void> {
     if (args.length !== 1) {
         throw new Error(messages.createUserUsage);
     }
-    var reader: Interface = createInterface({ input: process.stdin, output: process.stderr });
+    var reader: Interface = createInterface({ input: process.stdin });
+    // The iterator keeps the lines that arrive before each prompt (for example, from a pipe).
+    var lines: AsyncIterator<string> = reader[Symbol.asyncIterator]();
+    var ask = async function (prompt: string): Promise<string> {
+        process.stderr.write(prompt);
+        var line: IteratorResult<string> = await lines.next();
+        if (line.done === true) {
+            throw new Error(messages.inputEnded);
+        }
+        return line.value;
+    };
     var pool: Pool = createPool();
     try {
-        var givenName: string = (await reader.question(messages.givenNamePrompt)).trim();
-        var familyName: string = (await reader.question(messages.familyNamePrompt)).trim();
-        var email: string = (await reader.question(messages.emailPrompt)).trim();
-        var password: string = await reader.question(messages.passwordPrompt);
+        var givenName: string = (await ask(messages.givenNamePrompt)).trim();
+        var familyName: string = (await ask(messages.familyNamePrompt)).trim();
+        var email: string = (await ask(messages.emailPrompt)).trim();
+        var password: string = await ask(messages.passwordPrompt);
         if (password === '') {
             throw new Error(messages.passwordEmpty);
         }
