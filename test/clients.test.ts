@@ -1,17 +1,22 @@
 import { strict as assert } from 'node:assert';
 import type { Pool } from 'pg';
-import { createPgClientStore } from '../src/pg-stores.ts';
+import { createPgClientStore } from '../src/pg-auth-stores.ts';
 import type { ClientStore } from '../src/stores.ts';
-import { prepareDatabase } from './database.ts';
+import { poolAs, prepareDatabase, TEST_ROLES } from './database.ts';
 
 describe('clients', function (): void {
     var pool: Pool;
+    var authPool: Pool;
+    var appsPool: Pool;
     var store: ClientStore;
 
     before(async function (): Promise<void> {
         pool = await prepareDatabase();
-        store = createPgClientStore(pool);
-        await pool.query(`
+        authPool = poolAs(TEST_ROLES.auth);
+        appsPool = poolAs(TEST_ROLES.apps);
+        store = createPgClientStore(authPool);
+        // Registered with the applications role, read with the authentication role.
+        await appsPool.query(`
             insert into gate_one.clients (client_id, client_secret, redirect_uris, backchannel_logout_uri)
                 values ('app1', 'secret1', array['http://app1.example/cb'], 'http://app1.example:80/logout'),
                        ('app2', 'secret2', array['http://app2.example/cb'], null);
@@ -25,6 +30,8 @@ describe('clients', function (): void {
     });
 
     after(async function (): Promise<void> {
+        await appsPool.end();
+        await authPool.end();
         await pool.end();
     });
 

@@ -7,12 +7,12 @@ import { MFA_ACR, PASSWORD_ACR, requestsMfa } from './acr.ts';
 import type { Config } from './config.ts';
 import { formatMessage, lang, messages } from './messages.ts';
 import { isBlocked, recordFailure, recordSuccess, type Attempt } from './rate-limit.ts';
-import type { FailureStore, TrustedDeviceStore, UserStore } from './stores.ts';
+import type { AuthUserStore, FailureStore, TrustedDeviceStore } from './stores.ts';
 import { decryptTotpSecret, verifyTotpCode } from './totp.ts';
 import { verifyCredentials } from './users.ts';
 
 export interface InteractionStores {
-    readonly users: UserStore;
+    readonly users: AuthUserStore;
     readonly trustedDevices: TrustedDeviceStore;
     readonly failures: FailureStore;
 }

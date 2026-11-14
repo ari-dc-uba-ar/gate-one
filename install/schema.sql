@@ -18,6 +18,8 @@ create table gate_one.users (
     -- totp_last_step is the last 30 second step used, so a code cannot be used twice.
     totp_secret text,
     totp_last_step bigint,
+    -- An inactive user cannot sign in nor get tokens (users are deactivated, not deleted).
+    active boolean not null default true,
     created_at timestamptz not null default current_timestamp
 );
 

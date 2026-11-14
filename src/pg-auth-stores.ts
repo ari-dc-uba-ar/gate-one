@@ -1,44 +1,31 @@
-import { Pool } from 'pg';
+import type { Pool } from 'pg';
 import type { Adapter, AdapterFactory, AdapterPayload, JWK } from 'oidc-provider';
 import { formatMessage, messages } from './messages.ts';
-import type { ClientRecord, ClientResource, ClientStore, FailureStore, SigningKeyStore, TrustedDeviceStore, UserProfile, UserStore } from './stores.ts';
+import type { AuthUserStore, ClientRecord, ClientResource, ClientStore, FailureStore, SigningKeyStore, TrustedDeviceStore, UserProfile } from './stores.ts';
 
 /**
- * The connection is configured with the standard PostgreSQL environment variables
- * (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD, ...), which pg reads by itself.
+ * Data access of the authentication service (the gate-one server), connected with its own database
+ * role (see install/grants.sql). It only reads users, clients and signing keys; it writes only
+ * its own records: sessions and codes, failed attempts, remembered devices and the last TOTP step.
  */
-export function createPool(): Pool {
-    var pool: Pool = new Pool();
-    pool.on('error', function (error: Error): void {
-        console.error(messages.databasePoolError, error);
-    });
-    return pool;
-}
 
-export function createPgUserStore(pool: Pool): UserStore {
+/** Only active users can sign in or receive tokens. */
+export function createPgAuthUserStore(pool: Pool): AuthUserStore {
     return {
         findVerifier: async function (username: string): Promise<string | undefined> {
             var result = await pool.query<{ verifier: string }>(
-                'select verifier from gate_one.users where username = $1',
+                'select verifier from gate_one.users where username = $1 and active',
                 [username]
             );
             return result.rows.length === 0 ? undefined : result.rows[0].verifier;
         },
-        findProfile: async function (username: string): Promise<UserProfile | undefined> {
+        findActiveProfile: async function (username: string): Promise<UserProfile | undefined> {
             var result = await pool.query<UserProfile>(
                 'select given_name as "givenName", family_name as "familyName", email, email_verified as "emailVerified"'
-                + ' from gate_one.users where username = $1',
+                + ' from gate_one.users where username = $1 and active',
                 [username]
             );
             return result.rows.length === 0 ? undefined : result.rows[0];
-        },
-        add: async function (username: string, verifier: string, profile: UserProfile): Promise<boolean> {
-            var result = await pool.query(
-                'insert into gate_one.users (username, verifier, given_name, family_name, email, email_verified)'
-                + ' values ($1, $2, $3, $4, $5, $6) on conflict (username) do nothing',
-                [username, verifier, profile.givenName, profile.familyName, profile.email, profile.emailVerified]
-            );
-            return result.rowCount === 1;
         },
         findTotpSecret: async function (username: string): Promise<string | undefined> {
             var result = await pool.query<{ secret: string | null }>(
@@ -46,13 +33,6 @@ export function createPgUserStore(pool: Pool): UserStore {
                 [username]
             );
             return result.rows.length === 0 || result.rows[0].secret == null ? undefined : result.rows[0].secret;
-        },
-        setTotpSecret: async function (username: string, encryptedSecret: string | null): Promise<boolean> {
-            var result = await pool.query(
-                'update gate_one.users set totp_secret = $2, totp_last_step = null where username = $1',
-                [username, encryptedSecret]
-            );
-            return result.rowCount === 1;
         },
         useTotpStep: async function (username: string, step: number): Promise<boolean> {
             // A single statement, so two requests with the same code cannot both succeed.
@@ -81,9 +61,6 @@ export function createPgTrustedDeviceStore(pool: Pool): TrustedDeviceStore {
                 [tokenHash, username]
             );
             return result.rows.length > 0;
-        },
-        removeForUser: async function (username: string): Promise<void> {
-            await pool.query('delete from gate_one.trusted_devices where username = $1', [username]);
         },
     };
 }
@@ -136,9 +113,6 @@ export function createPgSigningKeyStore(pool: Pool): SigningKeyStore {
                 }
                 return row.jwk;
             });
-        },
-        add: async function (key: JWK): Promise<void> {
-            await pool.query('insert into gate_one.signing_keys (kid, jwk) values ($1, $2)', [key.kid, JSON.stringify(key)]);
         },
     };
 }

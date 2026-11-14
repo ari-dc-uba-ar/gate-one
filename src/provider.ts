@@ -21,7 +21,7 @@ import type { Config } from './config.ts';
 import { escapeHtml } from './interactions.ts';
 import { createFetchWithInternalDestinations } from './internal-fetch.ts';
 import { lang, messages } from './messages.ts';
-import type { ClientRecord, ClientResource, ClientStore, UserProfile, UserStore } from './stores.ts';
+import type { AuthUserStore, ClientRecord, ClientResource, ClientStore, UserProfile } from './stores.ts';
 
 const INTERACTION_TTL_SECONDS: number = 30 * 60;
 const ID_TOKEN_TTL_SECONDS: number = 10 * 60;
@@ -29,9 +29,9 @@ const ID_TOKEN_TTL_SECONDS: number = 10 * 60;
 const DEFAULT_ACCESS_TOKEN_TTL_SECONDS: number = 10 * 60;
 
 /**
- * The default policy, plus: when a service asks for a second factor and the session was opened
- * without one, the user goes through the sign-in again (where the second factor is asked or the
- * request is rejected).
+ * The default policy, plus two reasons to go through the sign-in again: the user of the session is
+ * no longer active, or a service asks for a second factor and the session was opened without one
+ * (then the second factor is asked or the request is rejected).
  */
 function createInteractionPolicy(): interactionPolicy.DefaultPolicy {
     var policy: interactionPolicy.DefaultPolicy = interactionPolicy.base();
@@ -39,6 +39,15 @@ function createInteractionPolicy(): interactionPolicy.DefaultPolicy {
     if (login == null) {
         throw new Error('oidc-provider default policy without a login prompt');
     }
+    // findAccount gives nothing for an inactive user: a session of a user deactivated after signing in
+    // goes through the sign-in again (where it is rejected). Without this check oidc-provider would go on
+    // to the consent prompt without the user's grant and fail.
+    login.checks.add(new interactionPolicy.Check('account_unavailable', 'the account of the session is not active', function (context: KoaContextWithOIDC): boolean {
+        if (context.oidc.session?.accountId != null && context.oidc.account == null) {
+            return interactionPolicy.Check.REQUEST_PROMPT;
+        }
+        return interactionPolicy.Check.NO_NEED_TO_PROMPT;
+    }));
     login.checks.add(new interactionPolicy.Check('mfa_required', 'a second factor is required', function (context: KoaContextWithOIDC): boolean {
         var acrValues: unknown = Reflect.get(Object(context.oidc.params), 'acr_values');
         if (requestsMfa(acrValues) && context.oidc.session?.acr !== MFA_ACR) {
@@ -100,7 +109,7 @@ async function findClientResource(clientStore: ClientStore, client: Client, reso
     });
 }
 
-export function createProvider(config: Config, keySet: JWKS, userStore: UserStore, clientStore: ClientStore, adapter: AdapterFactory): Provider {
+export function createProvider(config: Config, keySet: JWKS, userStore: AuthUserStore, clientStore: ClientStore, adapter: AdapterFactory): Provider {
     var providerConfiguration: Configuration = {
         jwks: keySet,
         adapter: function (model: string): Adapter {
@@ -197,7 +206,8 @@ export function createProvider(config: Config, keySet: JWKS, userStore: UserStor
             },
         },
         findAccount: async function (_context: KoaContextWithOIDC, accountId: string): Promise<Account | undefined> {
-            var profile: UserProfile | undefined = await userStore.findProfile(accountId);
+            // An inactive user gets no tokens, even with a session already open.
+            var profile: UserProfile | undefined = await userStore.findActiveProfile(accountId);
             if (profile == null) {
                 return undefined;
             }

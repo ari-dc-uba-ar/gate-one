@@ -6,11 +6,14 @@ import type { Express } from 'express';
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 import type { Pool } from 'pg';
 import { createApp } from '../src/app.ts';
-import { createPgAdapterFactory, createPgClientStore, createPgFailureStore, createPgSigningKeyStore, createPgTrustedDeviceStore, createPgUserStore } from '../src/pg-stores.ts';
+import { createSigningKey } from '../src/keys.ts';
+import { createPgAdapterFactory, createPgAuthUserStore, createPgClientStore, createPgFailureStore, createPgSigningKeyStore, createPgTrustedDeviceStore } from '../src/pg-auth-stores.ts';
+import { createPgSigningKeyAdminStore } from '../src/pg-signing-key-admin-store.ts';
+import { createPgUserAdminStore } from '../src/pg-user-admin-store.ts';
 import { POSTGRES_SCRAM_PARAMETERS } from '../src/scram.ts';
 import { encryptTotpSecret, generateTotpSecret, totpCodeAt } from '../src/totp.ts';
 import { addUser } from '../src/users.ts';
-import { prepareDatabase } from './database.ts';
+import { poolAs, prepareDatabase, TEST_ROLES } from './database.ts';
 
 function freePort(): Promise<number> {
     return new Promise<number>(function (resolve: (port: number) => void, reject: (error: Error) => void): void {
@@ -62,7 +65,11 @@ function location(response: Response, base: string): string {
 }
 
 describe('authorization code flow', function (): void {
+    /** The superuser connection prepares the database; each service uses its own role. */
     var pool: Pool;
+    var authPool: Pool;
+    var appsPool: Pool;
+    var usersPool: Pool;
     var server: Server;
     var issuer: string;
     const REDIRECT_URI: string = 'http://app.example/callback';
@@ -73,7 +80,11 @@ describe('authorization code flow', function (): void {
 
     before(async function (): Promise<void> {
         pool = await prepareDatabase();
-        await pool.query(`
+        authPool = poolAs(TEST_ROLES.auth);
+        appsPool = poolAs(TEST_ROLES.apps);
+        usersPool = poolAs(TEST_ROLES.users);
+        await createSigningKey(createPgSigningKeyAdminStore(pool));
+        await appsPool.query(`
             insert into gate_one.clients (client_id, client_secret, redirect_uris, backchannel_logout_uri)
                 values ('app', 'app-secret', array['${REDIRECT_URI}'], 'http://app.example/backchannel-logout');
             insert into gate_one.resource_servers (resource, scopes, access_token_ttl)
@@ -81,9 +92,9 @@ describe('authorization code flow', function (): void {
             insert into gate_one.client_resources (client_id, resource, scopes)
                 values ('app', '${API}', array['profile:read']);
         `);
-        var users = createPgUserStore(pool);
+        var users = createPgUserAdminStore(usersPool);
         await addUser(users, 'ana', 'ana password', { givenName: 'Ana', familyName: 'Muñoz', email: 'ana@example.com', emailVerified: false }, POSTGRES_SCRAM_PARAMETERS);
-        for (var name of ['bea', 'carla', 'dora']) {
+        for (var name of ['bea', 'carla', 'dora', 'eva', 'flor']) {
             await addUser(users, name, name + ' password', { givenName: name, familyName: 'Test', email: null, emailVerified: false }, POSTGRES_SCRAM_PARAMETERS);
         }
         for (var [username, secret] of TOTP_SECRETS) {
@@ -92,12 +103,12 @@ describe('authorization code flow', function (): void {
         var port: number = await freePort();
         issuer = 'http://localhost:' + port;
         var app: Express = await createApp({ issuer: issuer, port: port, cookieKeys: ['test-key'], sessionTtlSeconds: 8 * 60 * 60, scramParameters: POSTGRES_SCRAM_PARAMETERS, totpKey: TOTP_KEY }, {
-            users: users,
-            trustedDevices: createPgTrustedDeviceStore(pool),
-            failures: createPgFailureStore(pool),
-            clients: createPgClientStore(pool),
-            signingKeys: createPgSigningKeyStore(pool),
-            oidcAdapter: createPgAdapterFactory(pool),
+            users: createPgAuthUserStore(authPool),
+            trustedDevices: createPgTrustedDeviceStore(authPool),
+            failures: createPgFailureStore(authPool),
+            clients: createPgClientStore(authPool),
+            signingKeys: createPgSigningKeyStore(authPool),
+            oidcAdapter: createPgAdapterFactory(authPool),
         });
         server = await new Promise<Server>(function (resolve: (server: Server) => void, reject: (error: Error) => void): void {
             var listening: Server = app.listen(port, function (error?: Error): void {
@@ -113,6 +124,9 @@ describe('authorization code flow', function (): void {
     after(async function (): Promise<void> {
         server.closeAllConnections();
         await new Promise<void>(function (resolve: () => void): void { server.close(function (): void { resolve(); }); });
+        await usersPool.end();
+        await appsPool.end();
+        await authPool.end();
         await pool.end();
     });
 
@@ -347,6 +361,37 @@ describe('authorization code flow', function (): void {
             }
             var locked: Response = await signIn(new Browser(), 'v'.repeat(43), 'dora password', {}, 'dora');
             assert.equal(locked.status, 429);
+        });
+    });
+
+    describe('inactive users', function (): void {
+
+        it('an inactive user cannot sign in', async function (): Promise<void> {
+            await usersPool.query("update gate_one.users set active = false where username = 'eva'");
+            var response: Response = await signIn(new Browser(), 'v'.repeat(43), 'eva password', {}, 'eva');
+            assert.equal(response.status, 401);
+        });
+
+        it('a user deactivated with an open session gets no more tokens', async function (): Promise<void> {
+            var browser: Browser = new Browser();
+            var verifier: string = randomBytes(32).toString('base64url');
+            var signedIn: Response = await signIn(browser, verifier, 'flor password', {}, 'flor');
+            var callback: URL = new URL(location(await browser.request(location(signedIn, issuer)), issuer));
+            await usersPool.query("update gate_one.users set active = false where username = 'flor'");
+            // The code obtained before cannot be exchanged.
+            var tokenResponse: Response = await fetch(issuer + '/token', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Authorization': 'Basic ' + Buffer.from('app:app-secret').toString('base64'),
+                },
+                body: new URLSearchParams({ grant_type: 'authorization_code', code: callback.searchParams.get('code') ?? '', redirect_uri: REDIRECT_URI, code_verifier: verifier }).toString(),
+            });
+            assert.equal(tokenResponse.status, 400);
+            assert.equal(Reflect.get(Object(await tokenResponse.json()), 'error'), 'invalid_grant');
+            // The open session does not give a new code: the sign-in is asked again.
+            var again: Response = await browser.request(authorizationUrl(verifier));
+            assert.match(location(again, issuer), /\/interaction\//);
         });
     });
 });

@@ -6,10 +6,10 @@ import { createInteractionRoutes } from './interactions.ts';
 import { getKeySet } from './keys.ts';
 import { formatMessage, messages } from './messages.ts';
 import { createProvider } from './provider.ts';
-import type { ClientStore, FailureStore, SigningKeyStore, TrustedDeviceStore, UserStore } from './stores.ts';
+import type { AuthUserStore, ClientStore, FailureStore, SigningKeyStore, TrustedDeviceStore } from './stores.ts';
 
 export interface Stores {
-    readonly users: UserStore;
+    readonly users: AuthUserStore;
     readonly trustedDevices: TrustedDeviceStore;
     readonly failures: FailureStore;
     readonly clients: ClientStore;

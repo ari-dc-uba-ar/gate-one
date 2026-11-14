@@ -1,6 +1,6 @@
 import { formatMessage, messages } from './messages.ts';
 import { generateVerifier, verifyPassword, type ScramParameters } from './scram.ts';
-import type { UserProfile, UserStore } from './stores.ts';
+import type { AuthUserStore, UserAdminStore, UserProfile } from './stores.ts';
 
 /**
  * Usernames and passwords are limited to printable ASCII. That way the SCRAM verifier matches
@@ -18,7 +18,7 @@ export function isPrintableAscii(text: string): boolean {
  * it still computes a throwaway verifier, so the response time does not reveal which users
  * are registered.
  */
-export async function verifyCredentials(store: UserStore, username: string, password: string, parameters: ScramParameters): Promise<boolean> {
+export async function verifyCredentials(store: AuthUserStore, username: string, password: string, parameters: ScramParameters): Promise<boolean> {
     var verifier: string | undefined = isPrintableAscii(username) ? await store.findVerifier(username) : undefined;
     if (verifier == null || !isPrintableAscii(password)) {
         await generateVerifier(password, parameters);
@@ -27,7 +27,7 @@ export async function verifyCredentials(store: UserStore, username: string, pass
     return verifyPassword(password, verifier);
 }
 
-export async function addUser(store: UserStore, username: string, password: string, profile: UserProfile, parameters: ScramParameters): Promise<void> {
+export async function addUser(store: UserAdminStore, username: string, password: string, profile: UserProfile, parameters: ScramParameters): Promise<void> {
     if (!isPrintableAscii(username) || !isPrintableAscii(password)) {
         throw new Error(messages.nonAsciiCredentials);
     }
