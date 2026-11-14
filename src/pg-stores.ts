@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import type { Adapter, AdapterFactory, AdapterPayload, JWK } from 'oidc-provider';
 import { formatMessage, messages } from './messages.ts';
-import type { ClientRecord, ClientResource, ClientStore, SigningKeyStore, UserProfile, UserStore } from './stores.ts';
+import type { ClientRecord, ClientResource, ClientStore, FailureStore, SigningKeyStore, TrustedDeviceStore, UserProfile, UserStore } from './stores.ts';
 
 /**
  * The connection is configured with the standard PostgreSQL environment variables
@@ -39,6 +39,81 @@ export function createPgUserStore(pool: Pool): UserStore {
                 [username, verifier, profile.givenName, profile.familyName, profile.email, profile.emailVerified]
             );
             return result.rowCount === 1;
+        },
+        findTotpSecret: async function (username: string): Promise<string | undefined> {
+            var result = await pool.query<{ secret: string | null }>(
+                'select totp_secret as secret from gate_one.users where username = $1',
+                [username]
+            );
+            return result.rows.length === 0 || result.rows[0].secret == null ? undefined : result.rows[0].secret;
+        },
+        setTotpSecret: async function (username: string, encryptedSecret: string | null): Promise<boolean> {
+            var result = await pool.query(
+                'update gate_one.users set totp_secret = $2, totp_last_step = null where username = $1',
+                [username, encryptedSecret]
+            );
+            return result.rowCount === 1;
+        },
+        useTotpStep: async function (username: string, step: number): Promise<boolean> {
+            // A single statement, so two requests with the same code cannot both succeed.
+            var result = await pool.query(
+                'update gate_one.users set totp_last_step = $2'
+                + ' where username = $1 and (totp_last_step is null or totp_last_step < $2)',
+                [username, step]
+            );
+            return result.rowCount === 1;
+        },
+    };
+}
+
+export function createPgTrustedDeviceStore(pool: Pool): TrustedDeviceStore {
+    return {
+        add: async function (tokenHash: string, username: string, days: number): Promise<void> {
+            await pool.query(
+                'insert into gate_one.trusted_devices (token_hash, username, expires_at)'
+                + ' values ($1, $2, current_timestamp + make_interval(days => $3))',
+                [tokenHash, username, days]
+            );
+        },
+        isTrusted: async function (tokenHash: string, username: string): Promise<boolean> {
+            var result = await pool.query(
+                'select 1 from gate_one.trusted_devices where token_hash = $1 and username = $2 and expires_at > current_timestamp',
+                [tokenHash, username]
+            );
+            return result.rows.length > 0;
+        },
+        removeForUser: async function (username: string): Promise<void> {
+            await pool.query('delete from gate_one.trusted_devices where username = $1', [username]);
+        },
+    };
+}
+
+export function createPgFailureStore(pool: Pool): FailureStore {
+    return {
+        isBlocked: async function (key: string, limit: number, windowSeconds: number): Promise<boolean> {
+            var result = await pool.query(
+                'select 1 from gate_one.auth_failures where key = $1 and failures >= $2'
+                + ' and window_start > current_timestamp - make_interval(secs => $3)',
+                [key, limit, windowSeconds]
+            );
+            return result.rows.length > 0;
+        },
+        /**
+         * A window starts with the first failure; reaching the limit restarts it, so the block lasts
+         * windowSeconds from the last failure. Failures after an expired window start a new one.
+         */
+        recordFailure: async function (key: string, limit: number, windowSeconds: number): Promise<void> {
+            await pool.query(
+                'insert into gate_one.auth_failures as f (key, window_start, failures) values ($1, current_timestamp, 1)'
+                + ' on conflict (key) do update set'
+                + ' failures = case when f.window_start <= current_timestamp - make_interval(secs => $3) then 1 else f.failures + 1 end,'
+                + ' window_start = case when f.window_start <= current_timestamp - make_interval(secs => $3) then current_timestamp'
+                + ' when f.failures + 1 >= $2 then current_timestamp else f.window_start end',
+                [key, limit, windowSeconds]
+            );
+        },
+        reset: async function (key: string): Promise<void> {
+            await pool.query('delete from gate_one.auth_failures where key = $1', [key]);
         },
     };
 }
@@ -186,6 +261,15 @@ export function createPgAdapterFactory(pool: Pool): AdapterFactory {
             },
         };
     };
+}
+
+/** Removes the expired trusted devices and the failure counts whose window ended. */
+export async function deleteExpiredSecurityRecords(pool: Pool, failureWindowSeconds: number): Promise<void> {
+    await pool.query('delete from gate_one.trusted_devices where expires_at <= current_timestamp');
+    await pool.query(
+        'delete from gate_one.auth_failures where window_start <= current_timestamp - make_interval(secs => $1)',
+        [failureWindowSeconds]
+    );
 }
 
 /** Removes the expired records. Returns how many were removed. */

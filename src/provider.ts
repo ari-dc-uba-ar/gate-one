@@ -1,5 +1,6 @@
 import Provider, {
     errors,
+    interactionPolicy,
     type Account,
     type AccountClaims,
     type ClientCredentials,
@@ -15,6 +16,7 @@ import Provider, {
     type ResourceServer,
     type UnknownObject,
 } from 'oidc-provider';
+import { MFA_ACR, PASSWORD_ACR, requestsMfa } from './acr.ts';
 import type { Config } from './config.ts';
 import { escapeHtml } from './interactions.ts';
 import { createFetchWithInternalDestinations } from './internal-fetch.ts';
@@ -25,6 +27,27 @@ const INTERACTION_TTL_SECONDS: number = 30 * 60;
 const ID_TOKEN_TTL_SECONDS: number = 10 * 60;
 /** Access tokens for an API take its lifetime from gate_one.resource_servers; this is for any other. */
 const DEFAULT_ACCESS_TOKEN_TTL_SECONDS: number = 10 * 60;
+
+/**
+ * The default policy, plus: when a service asks for a second factor and the session was opened
+ * without one, the user goes through the sign-in again (where the second factor is asked or the
+ * request is rejected).
+ */
+function createInteractionPolicy(): interactionPolicy.DefaultPolicy {
+    var policy: interactionPolicy.DefaultPolicy = interactionPolicy.base();
+    var login: interactionPolicy.Prompt | undefined = policy.get('login');
+    if (login == null) {
+        throw new Error('oidc-provider default policy without a login prompt');
+    }
+    login.checks.add(new interactionPolicy.Check('mfa_required', 'a second factor is required', function (context: KoaContextWithOIDC): boolean {
+        var acrValues: unknown = Reflect.get(Object(context.oidc.params), 'acr_values');
+        if (requestsMfa(acrValues) && context.oidc.session?.acr !== MFA_ACR) {
+            return interactionPolicy.Check.REQUEST_PROMPT;
+        }
+        return interactionPolicy.Check.NO_NEED_TO_PROMPT;
+    }));
+    return policy;
+}
 
 /** Every client gets the standard OIDC scopes; the claims each one carries are in `claims` below. */
 const OIDC_SCOPES: string = 'openid profile email';
@@ -83,8 +106,16 @@ export function createProvider(config: Config, keySet: JWKS, userStore: UserStor
         adapter: function (model: string): Adapter {
             return model === 'Client' ? createClientAdapter(clientStore) : adapter(model);
         },
+        acrValues: [PASSWORD_ACR, MFA_ACR],
         claims: {
-            openid: ['sub'],
+            // The first four are oidc-provider's defaults, kept when the profile and email scopes were added.
+            acr: null,
+            sid: null,
+            auth_time: null,
+            iss: null,
+            amr: null,
+            // Like Entra ID, every ID token says how the user signed in (acr, amr) and when (auth_time).
+            openid: ['sub', 'acr', 'amr', 'auth_time'],
             profile: ['name', 'given_name', 'family_name', 'preferred_username'],
             email: ['email', 'email_verified'],
         },
@@ -114,6 +145,7 @@ export function createProvider(config: Config, keySet: JWKS, userStore: UserStor
             required: function (): boolean { return true; },
         },
         interactions: {
+            policy: createInteractionPolicy(),
             url: function (_context: KoaContextWithOIDC, interaction: Interaction): string {
                 return '/interaction/' + interaction.uid;
             },

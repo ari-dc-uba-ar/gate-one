@@ -1,5 +1,6 @@
 import { formatMessage, messages } from './messages.ts';
 import { POSTGRES_SCRAM_PARAMETERS, type ScramParameters } from './scram.ts';
+import { parseTotpKey } from './totp.ts';
 
 export interface Config {
     readonly issuer: string;
@@ -7,6 +8,7 @@ export interface Config {
     readonly cookieKeys: readonly string[];
     readonly sessionTtlSeconds: number;
     readonly scramParameters: ScramParameters;
+    readonly totpKey: Buffer;
 }
 
 function requiredVariable(name: string): string {
@@ -50,6 +52,11 @@ export function readScramParameters(): ScramParameters {
     };
 }
 
+/** Key that encrypts the second factor secrets (32 bytes in base64). */
+export function readTotpKey(): Buffer {
+    return parseTotpKey(requiredVariable('AUTH_TOTP_KEY'));
+}
+
 export function readConfig(): Config {
     var cookieKeys: string[] = requiredVariable('AUTH_COOKIE_KEYS')
         .split(',')
@@ -64,5 +71,6 @@ export function readConfig(): Config {
         cookieKeys: cookieKeys,
         sessionTtlSeconds: numericVariable('AUTH_SESSION_TTL', 8 * 60 * 60),
         scramParameters: readScramParameters(),
+        totpKey: readTotpKey(),
     };
 }
