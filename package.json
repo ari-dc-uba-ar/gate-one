@@ -38,9 +38,9 @@
     "build": "tsc",
     "start": "node --env-file=.env dist/server.js",
     "create-signing-key": "node dist/create-signing-key.js",
-    "create-user": "node --env-file=.env.users dist/create-user.js",
-    "enable-totp": "node --env-file=.env.users dist/enable-totp.js",
-    "reset-totp": "node --env-file=.env.users dist/reset-totp.js",
+    "create-user": "node --env-file=.env.user-admin dist/create-user.js",
+    "enable-totp": "node --env-file=.env.user-admin dist/enable-totp.js",
+    "reset-totp": "node --env-file=.env.user-admin dist/reset-totp.js",
     "test": "tsc -p tsconfig.test.json && mocha \"dist-test/test/**/*.js\"",
     "test-ci": "tsc -p tsconfig.test.json && c8 --reporter=lcov --reporter=text mocha \"dist-test/test/**/*.js\""
   },

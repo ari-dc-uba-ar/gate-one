@@ -6,7 +6,7 @@ import { Pool } from 'pg';
 export const TEST_ROLES = {
     auth: 'gate_one_test_auth',
     apps: 'gate_one_test_apps',
-    users: 'gate_one_test_users',
+    userAdmin: 'gate_one_test_user_admin',
 } as const;
 
 /**
@@ -33,7 +33,7 @@ export async function prepareDatabase(): Promise<Pool> {
     var grants: string = (await readFile(resolve(process.cwd(), 'install', 'grants.sql'), 'utf8'))
         .replaceAll(':"auth_role"', '"' + TEST_ROLES.auth + '"')
         .replaceAll(':"apps_role"', '"' + TEST_ROLES.apps + '"')
-        .replaceAll(':"users_role"', '"' + TEST_ROLES.users + '"');
+        .replaceAll(':"user_admin_role"', '"' + TEST_ROLES.userAdmin + '"');
     if (grants.includes(':"')) {
         throw new Error('install/grants.sql uses a psql variable the tests do not replace');
     }

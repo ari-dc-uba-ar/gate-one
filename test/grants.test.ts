@@ -69,15 +69,15 @@ describe('database roles', function (): void {
         [TEST_ROLES.apps, "select payload from gate_one.oidc_models", false],
         [TEST_ROLES.apps, "select jwk from gate_one.signing_keys", false],
         // 3. Users: only users and, to reset the second factor, removing remembered devices.
-        [TEST_ROLES.users, "insert into gate_one.users (username, verifier, given_name, family_name) values ('x', 'SCRAM-SHA-256$x', 'x', 'x')", true],
-        [TEST_ROLES.users, "update gate_one.users set verifier = 'SCRAM-SHA-256$y', active = false where username = 'ana'", true],
-        [TEST_ROLES.users, "delete from gate_one.users where username = 'ana'", false],
-        [TEST_ROLES.users, "delete from gate_one.trusted_devices where username = 'ana'", true],
-        [TEST_ROLES.users, "insert into gate_one.trusted_devices (token_hash, username, expires_at) values ('x', 'ana', current_timestamp)", false],
-        [TEST_ROLES.users, "select client_secret from gate_one.clients", false],
-        [TEST_ROLES.users, "select payload from gate_one.oidc_models", false],
-        [TEST_ROLES.users, "select key from gate_one.auth_failures", false],
-        [TEST_ROLES.users, "select jwk from gate_one.signing_keys", false],
+        [TEST_ROLES.userAdmin, "insert into gate_one.users (username, verifier, given_name, family_name) values ('x', 'SCRAM-SHA-256$x', 'x', 'x')", true],
+        [TEST_ROLES.userAdmin, "update gate_one.users set verifier = 'SCRAM-SHA-256$y', active = false where username = 'ana'", true],
+        [TEST_ROLES.userAdmin, "delete from gate_one.users where username = 'ana'", false],
+        [TEST_ROLES.userAdmin, "delete from gate_one.trusted_devices where username = 'ana'", true],
+        [TEST_ROLES.userAdmin, "insert into gate_one.trusted_devices (token_hash, username, expires_at) values ('x', 'ana', current_timestamp)", false],
+        [TEST_ROLES.userAdmin, "select client_secret from gate_one.clients", false],
+        [TEST_ROLES.userAdmin, "select payload from gate_one.oidc_models", false],
+        [TEST_ROLES.userAdmin, "select key from gate_one.auth_failures", false],
+        [TEST_ROLES.userAdmin, "select jwk from gate_one.signing_keys", false],
     ];
 
     cases.forEach(function ([role, sql, expected]: readonly [string, string, boolean]): void {

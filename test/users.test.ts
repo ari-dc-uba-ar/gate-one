@@ -12,7 +12,7 @@ const PROFILE: UserProfile = { givenName: 'Ana', familyName: 'Muñoz', email: 'a
 describe('users', function (): void {
     var pool: Pool;
     var authPool: Pool;
-    var usersPool: Pool;
+    var userAdminPool: Pool;
     /** Users are created by the administration and read by the authentication, each one with its role. */
     var admin: UserAdminStore;
     var auth: AuthUserStore;
@@ -20,14 +20,14 @@ describe('users', function (): void {
     before(async function (): Promise<void> {
         pool = await prepareDatabase();
         authPool = poolAs(TEST_ROLES.auth);
-        usersPool = poolAs(TEST_ROLES.users);
-        admin = createPgUserAdminStore(usersPool);
+        userAdminPool = poolAs(TEST_ROLES.userAdmin);
+        admin = createPgUserAdminStore(userAdminPool);
         auth = createPgAuthUserStore(authPool);
         await addUser(admin, 'ana', 'ana password', PROFILE, POSTGRES_SCRAM_PARAMETERS);
     });
 
     after(async function (): Promise<void> {
-        await usersPool.end();
+        await userAdminPool.end();
         await authPool.end();
         await pool.end();
     });
@@ -98,7 +98,7 @@ describe('users', function (): void {
     it('an inactive user cannot sign in nor get a profile, but still exists for the administration', async function (): Promise<void> {
         await addUser(admin, 'inactiva', 'inactive password', PROFILE, POSTGRES_SCRAM_PARAMETERS);
         assert.equal(await verifyCredentials(auth, 'inactiva', 'inactive password', POSTGRES_SCRAM_PARAMETERS), true);
-        await usersPool.query("update gate_one.users set active = false where username = 'inactiva'");
+        await userAdminPool.query("update gate_one.users set active = false where username = 'inactiva'");
         assert.equal(await verifyCredentials(auth, 'inactiva', 'inactive password', POSTGRES_SCRAM_PARAMETERS), false);
         assert.equal(await auth.findActiveProfile('inactiva'), undefined);
         assert.deepEqual(await admin.findProfile('inactiva'), PROFILE);
