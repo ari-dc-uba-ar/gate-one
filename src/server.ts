@@ -5,15 +5,15 @@ import { readConfig, readLang, type Config } from './config.ts';
 import { formatMessage, messages, setLang } from './messages.ts';
 import {
     createPgAdapterFactory,
+    createPgAuthUserStore,
     createPgClientStore,
     createPgFailureStore,
     createPgSigningKeyStore,
     createPgTrustedDeviceStore,
-    createPgUserStore,
-    createPool,
     deleteExpiredModels,
     deleteExpiredSecurityRecords,
-} from './pg-stores.ts';
+} from './pg-auth-stores.ts';
+import { createPool } from './pg-pool.ts';
 import { FAILURE_WINDOW_SECONDS } from './rate-limit.ts';
 
 const EXPIRED_CLEANUP_INTERVAL_MS: number = 10 * 60 * 1000;
@@ -33,7 +33,7 @@ async function main(): Promise<void> {
     var config: Config = readConfig();
     var pool: Pool = createPool();
     var app: Express = await createApp(config, {
-        users: createPgUserStore(pool),
+        users: createPgAuthUserStore(pool),
         trustedDevices: createPgTrustedDeviceStore(pool),
         failures: createPgFailureStore(pool),
         clients: createPgClientStore(pool),

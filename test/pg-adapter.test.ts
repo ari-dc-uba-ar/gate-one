@@ -1,19 +1,22 @@
 import { strict as assert } from 'node:assert';
 import type { Adapter, AdapterFactory, AdapterPayload } from 'oidc-provider';
 import type { Pool } from 'pg';
-import { createPgAdapterFactory, deleteExpiredModels } from '../src/pg-stores.ts';
-import { prepareDatabase } from './database.ts';
+import { createPgAdapterFactory, deleteExpiredModels } from '../src/pg-auth-stores.ts';
+import { poolAs, prepareDatabase, TEST_ROLES } from './database.ts';
 
 describe('oidc-provider adapter', function (): void {
     var pool: Pool;
+    var authPool: Pool;
     var factory: AdapterFactory;
 
     before(async function (): Promise<void> {
         pool = await prepareDatabase();
-        factory = createPgAdapterFactory(pool);
+        authPool = poolAs(TEST_ROLES.auth);
+        factory = createPgAdapterFactory(authPool);
     });
 
     after(async function (): Promise<void> {
+        await authPool.end();
         await pool.end();
     });
 
@@ -39,14 +42,14 @@ describe('oidc-provider adapter', function (): void {
         await adapter.upsert('old', { accountId: 'ana' }, 60);
         await pool.query("update gate_one.oidc_models set expires_at = current_timestamp - interval '1 second' where id = 'old'");
         assert.equal(await adapter.find('old'), undefined);
-        assert.ok(await deleteExpiredModels(pool) >= 1);
+        assert.ok(await deleteExpiredModels(authPool) >= 1);
         var result = await pool.query("select 1 from gate_one.oidc_models where id = 'old'");
         assert.equal(result.rows.length, 0);
     });
 
     it('keeps records without expiration', async function (): Promise<void> {
         await factory('Session').upsert('s0', { accountId: 'ana', uid: 'u0' });
-        await deleteExpiredModels(pool);
+        await deleteExpiredModels(authPool);
         assert.deepEqual(await factory('Session').find('s0'), { accountId: 'ana', uid: 'u0' });
     });
 

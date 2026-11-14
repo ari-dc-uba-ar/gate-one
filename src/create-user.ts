@@ -2,7 +2,8 @@ import type { Pool } from 'pg';
 import { readLang, readScramParameters } from './config.ts';
 import { createConsoleInput, type ConsoleInput } from './console-input.ts';
 import { formatMessage, messages, setLang } from './messages.ts';
-import { createPgUserStore, createPool } from './pg-stores.ts';
+import { createPool } from './pg-pool.ts';
+import { createPgUserAdminStore } from './pg-user-admin-store.ts';
 import type { UserProfile } from './stores.ts';
 import { addUser } from './users.ts';
 
@@ -32,7 +33,7 @@ async function main(): Promise<void> {
             email: email === '' ? null : email,
             emailVerified: false,
         };
-        await addUser(createPgUserStore(pool), args[0], password, profile, readScramParameters());
+        await addUser(createPgUserAdminStore(pool), args[0], password, profile, readScramParameters());
         console.log(formatMessage(messages.userCreated, args[0]));
     } finally {
         input.close();

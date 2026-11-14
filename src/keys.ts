@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { exportJWK, generateKeyPair, type JWK as JoseJwk } from 'jose';
 import type { JWK, JWKS } from 'oidc-provider';
 import { formatMessage, messages } from './messages.ts';
-import type { SigningKeyStore } from './stores.ts';
+import type { SigningKeyAdminStore, SigningKeyStore } from './stores.ts';
 
 const ALGORITHM: string = 'ES256';
 
@@ -23,17 +23,22 @@ function toProviderJwk(key: JoseJwk, keyId: string): JWK {
 }
 
 /**
- * Returns the signing key set. If the store has none it generates an ES256 pair and saves it.
- * The stored keys include the private part.
+ * Returns the signing key set. The keys are created at installation time (create-signing-key),
+ * so the authentication service only reads them; without any it cannot start.
  */
 export async function getKeySet(store: SigningKeyStore): Promise<JWKS> {
     var keys: JWK[] = await store.list();
-    if (keys.length > 0) {
-        return { keys: keys };
+    if (keys.length === 0) {
+        throw new Error(messages.noSigningKey);
     }
+    return { keys: keys };
+}
+
+/** Generates an ES256 pair and saves it (the stored key includes the private part). Returns its kid. */
+export async function createSigningKey(store: SigningKeyAdminStore): Promise<string> {
     var pair = await generateKeyPair(ALGORITHM, { extractable: true });
     var privateKey: JoseJwk = await exportJWK(pair.privateKey);
-    await store.add(toProviderJwk(privateKey, randomUUID()));
-    // Read back: if another instance generated a key at the same time, both are published.
-    return { keys: await store.list() };
+    var key: JWK = toProviderJwk(privateKey, randomUUID());
+    await store.add(key);
+    return String(key.kid);
 }

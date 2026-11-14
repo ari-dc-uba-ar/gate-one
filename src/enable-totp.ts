@@ -3,8 +3,9 @@ import QRCode from 'qrcode';
 import { readLang, readTotpKey } from './config.ts';
 import { createConsoleInput, type ConsoleInput } from './console-input.ts';
 import { formatMessage, messages, setLang } from './messages.ts';
-import { createPgUserStore, createPool } from './pg-stores.ts';
-import type { UserStore } from './stores.ts';
+import { createPool } from './pg-pool.ts';
+import { createPgUserAdminStore } from './pg-user-admin-store.ts';
+import type { UserAdminStore } from './stores.ts';
 import { encryptTotpSecret, generateTotpSecret, totpUri, verifyTotpCode } from './totp.ts';
 
 /**
@@ -22,7 +23,7 @@ async function main(): Promise<void> {
     var input: ConsoleInput = createConsoleInput();
     var pool: Pool = createPool();
     try {
-        var users: UserStore = createPgUserStore(pool);
+        var users: UserAdminStore = createPgUserAdminStore(pool);
         if (await users.findProfile(username) == null) {
             throw new Error(formatMessage(messages.userNotFound, username));
         }

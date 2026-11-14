@@ -1,76 +1,86 @@
 import { strict as assert } from 'node:assert';
 import type { Pool } from 'pg';
-import { createPgUserStore } from '../src/pg-stores.ts';
+import { createPgAuthUserStore, createPgTrustedDeviceStore } from '../src/pg-auth-stores.ts';
+import { createPgUserAdminStore } from '../src/pg-user-admin-store.ts';
 import { POSTGRES_SCRAM_PARAMETERS } from '../src/scram.ts';
-import type { UserProfile, UserStore } from '../src/stores.ts';
+import type { AuthUserStore, UserAdminStore, UserProfile } from '../src/stores.ts';
 import { addUser, isPrintableAscii, verifyCredentials } from '../src/users.ts';
-import { prepareDatabase } from './database.ts';
+import { poolAs, prepareDatabase, TEST_ROLES } from './database.ts';
 
 const PROFILE: UserProfile = { givenName: 'Ana', familyName: 'Muñoz', email: 'ana@example.com', emailVerified: false };
 
 describe('users', function (): void {
     var pool: Pool;
-    var store: UserStore;
+    var authPool: Pool;
+    var usersPool: Pool;
+    /** Users are created by the administration and read by the authentication, each one with its role. */
+    var admin: UserAdminStore;
+    var auth: AuthUserStore;
 
     before(async function (): Promise<void> {
         pool = await prepareDatabase();
-        store = createPgUserStore(pool);
-        await addUser(store, 'ana', 'ana password', PROFILE, POSTGRES_SCRAM_PARAMETERS);
+        authPool = poolAs(TEST_ROLES.auth);
+        usersPool = poolAs(TEST_ROLES.users);
+        admin = createPgUserAdminStore(usersPool);
+        auth = createPgAuthUserStore(authPool);
+        await addUser(admin, 'ana', 'ana password', PROFILE, POSTGRES_SCRAM_PARAMETERS);
     });
 
     after(async function (): Promise<void> {
+        await usersPool.end();
+        await authPool.end();
         await pool.end();
     });
 
     it('stores a SCRAM-SHA-256 verifier', async function (): Promise<void> {
-        var verifier: string | undefined = await store.findVerifier('ana');
+        var verifier: string | undefined = await auth.findVerifier('ana');
         assert.match(verifier ?? '', /^SCRAM-SHA-256\$4096:/);
     });
 
     it('accepts the right password', async function (): Promise<void> {
-        assert.equal(await verifyCredentials(store, 'ana', 'ana password', POSTGRES_SCRAM_PARAMETERS), true);
+        assert.equal(await verifyCredentials(auth, 'ana', 'ana password', POSTGRES_SCRAM_PARAMETERS), true);
     });
 
     it('rejects a wrong password', async function (): Promise<void> {
-        assert.equal(await verifyCredentials(store, 'ana', 'ana passwore', POSTGRES_SCRAM_PARAMETERS), false);
+        assert.equal(await verifyCredentials(auth, 'ana', 'ana passwore', POSTGRES_SCRAM_PARAMETERS), false);
     });
 
     it('rejects an unknown user', async function (): Promise<void> {
-        assert.equal(await verifyCredentials(store, 'bea', 'ana password', POSTGRES_SCRAM_PARAMETERS), false);
+        assert.equal(await verifyCredentials(auth, 'bea', 'ana password', POSTGRES_SCRAM_PARAMETERS), false);
     });
 
     it('rejects non ASCII credentials at login', async function (): Promise<void> {
-        assert.equal(await verifyCredentials(store, 'ana', 'contraseña', POSTGRES_SCRAM_PARAMETERS), false);
-        assert.equal(await verifyCredentials(store, 'añа', 'ana password', POSTGRES_SCRAM_PARAMETERS), false);
+        assert.equal(await verifyCredentials(auth, 'ana', 'contraseña', POSTGRES_SCRAM_PARAMETERS), false);
+        assert.equal(await verifyCredentials(auth, 'añа', 'ana password', POSTGRES_SCRAM_PARAMETERS), false);
     });
 
     it('refuses to create non ASCII users or passwords', async function (): Promise<void> {
-        await assert.rejects(addUser(store, 'ñandú', 'password', PROFILE, POSTGRES_SCRAM_PARAMETERS), /printable ASCII/);
-        await assert.rejects(addUser(store, 'bea', 'contraseña', PROFILE, POSTGRES_SCRAM_PARAMETERS), /printable ASCII/);
+        await assert.rejects(addUser(admin, 'ñandú', 'password', PROFILE, POSTGRES_SCRAM_PARAMETERS), /printable ASCII/);
+        await assert.rejects(addUser(admin, 'bea', 'contraseña', PROFILE, POSTGRES_SCRAM_PARAMETERS), /printable ASCII/);
     });
 
     it('refuses to create an existing user', async function (): Promise<void> {
-        await assert.rejects(addUser(store, 'ana', 'other', PROFILE, POSTGRES_SCRAM_PARAMETERS), /the user ana already exists/);
+        await assert.rejects(addUser(admin, 'ana', 'other', PROFILE, POSTGRES_SCRAM_PARAMETERS), /the user ana already exists/);
     });
 
     it('stores the profile, which may have non ASCII names', async function (): Promise<void> {
-        assert.deepEqual(await store.findProfile('ana'), PROFILE);
-        assert.equal(await store.findProfile('bea'), undefined);
+        assert.deepEqual(await admin.findProfile('ana'), PROFILE);
+        assert.equal(await admin.findProfile('bea'), undefined);
     });
 
     it('stores a user without email', async function (): Promise<void> {
         var profile: UserProfile = { givenName: 'Dora', familyName: 'Paz', email: null, emailVerified: false };
-        await addUser(store, 'dora', 'dora password', profile, POSTGRES_SCRAM_PARAMETERS);
-        assert.deepEqual(await store.findProfile('dora'), profile);
+        await addUser(admin, 'dora', 'dora password', profile, POSTGRES_SCRAM_PARAMETERS);
+        assert.deepEqual(await admin.findProfile('dora'), profile);
     });
 
     it('requires given and family names', async function (): Promise<void> {
-        await assert.rejects(addUser(store, 'eva', 'password', { ...PROFILE, givenName: ' ' }, POSTGRES_SCRAM_PARAMETERS), /given name and the family name/);
-        await assert.rejects(addUser(store, 'eva', 'password', { ...PROFILE, familyName: '' }, POSTGRES_SCRAM_PARAMETERS), /given name and the family name/);
+        await assert.rejects(addUser(admin, 'eva', 'password', { ...PROFILE, givenName: ' ' }, POSTGRES_SCRAM_PARAMETERS), /given name and the family name/);
+        await assert.rejects(addUser(admin, 'eva', 'password', { ...PROFILE, familyName: '' }, POSTGRES_SCRAM_PARAMETERS), /given name and the family name/);
     });
 
     it('rejects an invalid email', async function (): Promise<void> {
-        await assert.rejects(addUser(store, 'eva', 'password', { ...PROFILE, email: 'eva at example.com' }, POSTGRES_SCRAM_PARAMETERS), /invalid email/);
+        await assert.rejects(addUser(admin, 'eva', 'password', { ...PROFILE, email: 'eva at example.com' }, POSTGRES_SCRAM_PARAMETERS), /invalid email/);
     });
 
     // Reading pg_authid needs a superuser. PostgreSQL 14+ stores passwords as SCRAM-SHA-256 by default.
@@ -78,11 +88,30 @@ describe('users', function (): void {
         await pool.query("create role gate_one_test_role password 'role password'");
         try {
             var result = await pool.query<{ rolpassword: string }>("select rolpassword from pg_authid where rolname = 'gate_one_test_role'");
-            assert.equal(await store.add('carla', result.rows[0].rolpassword, PROFILE), true);
-            assert.equal(await verifyCredentials(store, 'carla', 'role password', POSTGRES_SCRAM_PARAMETERS), true);
+            assert.equal(await admin.add('carla', result.rows[0].rolpassword, PROFILE), true);
+            assert.equal(await verifyCredentials(auth, 'carla', 'role password', POSTGRES_SCRAM_PARAMETERS), true);
         } finally {
             await pool.query('drop role gate_one_test_role');
         }
+    });
+
+    it('an inactive user cannot sign in nor get a profile, but still exists for the administration', async function (): Promise<void> {
+        await addUser(admin, 'inactiva', 'inactive password', PROFILE, POSTGRES_SCRAM_PARAMETERS);
+        assert.equal(await verifyCredentials(auth, 'inactiva', 'inactive password', POSTGRES_SCRAM_PARAMETERS), true);
+        await usersPool.query("update gate_one.users set active = false where username = 'inactiva'");
+        assert.equal(await verifyCredentials(auth, 'inactiva', 'inactive password', POSTGRES_SCRAM_PARAMETERS), false);
+        assert.equal(await auth.findActiveProfile('inactiva'), undefined);
+        assert.deepEqual(await admin.findProfile('inactiva'), PROFILE);
+    });
+
+    it('resetting the second factor also forgets the remembered devices', async function (): Promise<void> {
+        assert.equal(await admin.setTotpSecret('ana', 'v1:encrypted'), true);
+        await createPgTrustedDeviceStore(authPool).add('hash-1', 'ana', 30);
+        assert.equal(await auth.findTotpSecret('ana'), 'v1:encrypted');
+        assert.equal(await admin.resetTotp('ana'), true);
+        assert.equal(await auth.findTotpSecret('ana'), undefined);
+        assert.equal(await createPgTrustedDeviceStore(authPool).isTrusted('hash-1', 'ana'), false);
+        assert.equal(await admin.resetTotp('nobody'), false);
     });
 
     it('isPrintableAscii', function (): void {
