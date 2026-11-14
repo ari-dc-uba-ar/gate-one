@@ -69,7 +69,7 @@ describe('authorization code flow', function (): void {
     var pool: Pool;
     var authPool: Pool;
     var appsPool: Pool;
-    var usersPool: Pool;
+    var userAdminPool: Pool;
     var server: Server;
     var issuer: string;
     const REDIRECT_URI: string = 'http://app.example/callback';
@@ -82,7 +82,7 @@ describe('authorization code flow', function (): void {
         pool = await prepareDatabase();
         authPool = poolAs(TEST_ROLES.auth);
         appsPool = poolAs(TEST_ROLES.apps);
-        usersPool = poolAs(TEST_ROLES.users);
+        userAdminPool = poolAs(TEST_ROLES.userAdmin);
         await createSigningKey(createPgSigningKeyAdminStore(pool));
         await appsPool.query(`
             insert into gate_one.clients (client_id, client_secret, redirect_uris, backchannel_logout_uri)
@@ -92,7 +92,7 @@ describe('authorization code flow', function (): void {
             insert into gate_one.client_resources (client_id, resource, scopes)
                 values ('app', '${API}', array['profile:read']);
         `);
-        var users = createPgUserAdminStore(usersPool);
+        var users = createPgUserAdminStore(userAdminPool);
         await addUser(users, 'ana', 'ana password', { givenName: 'Ana', familyName: 'Muñoz', email: 'ana@example.com', emailVerified: false }, POSTGRES_SCRAM_PARAMETERS);
         for (var name of ['bea', 'carla', 'dora', 'eva', 'flor']) {
             await addUser(users, name, name + ' password', { givenName: name, familyName: 'Test', email: null, emailVerified: false }, POSTGRES_SCRAM_PARAMETERS);
@@ -124,7 +124,7 @@ describe('authorization code flow', function (): void {
     after(async function (): Promise<void> {
         server.closeAllConnections();
         await new Promise<void>(function (resolve: () => void): void { server.close(function (): void { resolve(); }); });
-        await usersPool.end();
+        await userAdminPool.end();
         await appsPool.end();
         await authPool.end();
         await pool.end();
@@ -367,7 +367,7 @@ describe('authorization code flow', function (): void {
     describe('inactive users', function (): void {
 
         it('an inactive user cannot sign in', async function (): Promise<void> {
-            await usersPool.query("update gate_one.users set active = false where username = 'eva'");
+            await userAdminPool.query("update gate_one.users set active = false where username = 'eva'");
             var response: Response = await signIn(new Browser(), 'v'.repeat(43), 'eva password', {}, 'eva');
             assert.equal(response.status, 401);
         });
@@ -377,7 +377,7 @@ describe('authorization code flow', function (): void {
             var verifier: string = randomBytes(32).toString('base64url');
             var signedIn: Response = await signIn(browser, verifier, 'flor password', {}, 'flor');
             var callback: URL = new URL(location(await browser.request(location(signedIn, issuer)), issuer));
-            await usersPool.query("update gate_one.users set active = false where username = 'flor'");
+            await userAdminPool.query("update gate_one.users set active = false where username = 'flor'");
             // The code obtained before cannot be exchanged.
             var tokenResponse: Response = await fetch(issuer + '/token', {
                 method: 'POST',

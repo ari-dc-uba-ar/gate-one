@@ -32,16 +32,16 @@ gate-one is split by what each part needs to know and to do. Each part connects 
 |---|---|---|
 | `gate_one_auth` | the gate-one server (authentication) | read users, clients and signing keys; write only its own records (sessions, codes, failed attempts, remembered devices) |
 | `gate_one_apps` | systems administration | register clients, APIs and their permissions |
-| `gate_one_users` | users administration (`create-user`, `enable-totp`, `reset-totp`) | create users and change their data, passwords, second factor and active flag |
+| `gate_one_user_admin` | users administration (`create-user`, `enable-totp`, `reset-totp`) | create users and change their data, passwords, second factor and active flag |
 
 None of them can create or alter objects. Run as a PostgreSQL administrator:
 
 ```sh
-psql -U postgres -c "create role gate_one_auth login" -c "create role gate_one_apps login" -c "create role gate_one_users login"
+psql -U postgres -c "create role gate_one_auth login" -c "create role gate_one_apps login" -c "create role gate_one_user_admin login"
 psql -U postgres -c "\password gate_one_auth"     # and the same for the other two
 psql -U postgres -c "create database gate_one"
 psql -U postgres -d gate_one -v ON_ERROR_STOP=1 -f install/schema.sql
-psql -U postgres -d gate_one -v ON_ERROR_STOP=1 -v auth_role=gate_one_auth -v apps_role=gate_one_apps -v users_role=gate_one_users -f install/grants.sql
+psql -U postgres -d gate_one -v ON_ERROR_STOP=1 -v auth_role=gate_one_auth -v apps_role=gate_one_apps -v user_admin_role=gate_one_user_admin -f install/grants.sql
 ```
 
 `install/schema.sql` creates the `gate_one` schema; `install/grants.sql` gives each role its permissions.
@@ -60,7 +60,7 @@ of its own role.
 
 ```sh
 cp .env.example .env
-cp .env.users.example .env.users
+cp .env.user-admin.example .env.user-admin
 ```
 
 Edit `.env` (the server):
@@ -75,7 +75,7 @@ Edit `.env` (the server):
 - Optional: `AUTH_SESSION_TTL` (seconds, 8 hours by default), `AUTH_SCRAM_ITERATIONS` and `AUTH_SCRAM_SALT_LENGTH`
   (4096 and 16 by default, as in PostgreSQL).
 
-Edit `.env.users` (the users administration commands): the connection with the `gate_one_users` role,
+Edit `.env.user-admin` (the users administration commands): the connection with the `gate_one_user_admin` role,
 `AUTH_LANG`, the same `AUTH_TOTP_KEY` as the server and, optionally, the SCRAM parameters.
 
 ### 4. Register the services
@@ -99,7 +99,7 @@ npm run create-user -- <username>
 It asks for the given name, the family name, the email (optional) and the password.
 
 Users are deactivated, not deleted (`update gate_one.users set active = false where username = ...`, with the
-`gate_one_users` role). An inactive user cannot sign in, and a session already open gets no more tokens; the tokens
+`gate_one_user_admin` role). An inactive user cannot sign in, and a session already open gets no more tokens; the tokens
 already issued remain valid until they expire.
 
 ### 6. Start
@@ -161,7 +161,7 @@ Wrong passwords and wrong codes count as failures. A username is locked for 15 m
 
 The tests need a PostgreSQL database whose name contains `test`, given by the `PG*` variables, because they drop and
 recreate the `gate_one` schema. The connection must be a superuser's: the tests create the roles `gate_one_test_auth`,
-`gate_one_test_apps` and `gate_one_test_users` (if they do not exist), check their permissions and read `pg_authid`.
+`gate_one_test_apps` and `gate_one_test_user_admin` (if they do not exist), check their permissions and read `pg_authid`.
 
 ```sh
 PGDATABASE=gate_one_test npm test
